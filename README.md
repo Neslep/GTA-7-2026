@@ -31,6 +31,11 @@
 | Jump / Handbrake | `Space` |
 | Enter / Exit vehicle | `F` |
 | Rotate camera | Mouse |
+| Move on mobile | Left joystick |
+| Sprint / Boost on mobile | `RUN` / `BOOST` |
+| Jump / Handbrake on mobile | `JUMP` / `BRAKE` |
+| Enter / Exit on mobile | `ENTER` / `EXIT` |
+| Rotate camera on mobile | Drag the screen |
 | Release pointer lock | `Esc` |
 
 ## 🚀 Running Locally

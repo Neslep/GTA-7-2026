@@ -1,9 +1,23 @@
 // -------------------- INPUT --------------------
 const keys = {};
+const keySources = { keyboard: {}, touch: {} };
 const mouse = { x: 0, y: 0, dx: 0, dy: 0, locked: false };
+const hasTouchControls = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
-addEventListener('keydown', e => { keys[e.code] = true; });
-addEventListener('keyup', e => { keys[e.code] = false; });
+function setInputKey(source, code, isDown) {
+  if (!code || !keySources[source]) return;
+  keySources[source][code] = isDown;
+  keys[code] = Boolean(keySources.keyboard[code] || keySources.touch[code]);
+}
+
+function clearKeySource(source) {
+  for (const code of Object.keys(keySources[source])) {
+    setInputKey(source, code, false);
+  }
+}
+
+addEventListener('keydown', e => { setInputKey('keyboard', e.code, true); });
+addEventListener('keyup', e => { setInputKey('keyboard', e.code, false); });
 addEventListener('mousemove', e => {
   if (mouse.locked) { mouse.dx += e.movementX; mouse.dy += e.movementY; }
 });
@@ -11,18 +25,146 @@ addEventListener('mousemove', e => {
 const playBtn = document.getElementById('playBtn');
 const intro = document.getElementById('intro');
 const hud = document.getElementById('hud');
+const mobileRunBtn = document.getElementById('mobileRunBtn');
+const mobileJumpBtn = document.getElementById('mobileJumpBtn');
+const mobileCarBtn = document.getElementById('mobileCarBtn');
+
+if (hasTouchControls) document.body.classList.add('touch-ui');
+
+function requestGamePointerLock() {
+  if (hasTouchControls || !renderer.domElement.requestPointerLock) return;
+  renderer.domElement.requestPointerLock();
+}
 
 playBtn.addEventListener('click', () => {
   intro.style.opacity = '0';
   setTimeout(() => intro.style.display = 'none', 800);
   hud.classList.add('active');
-  renderer.domElement.requestPointerLock();
+  requestGamePointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
   mouse.locked = document.pointerLockElement === renderer.domElement;
 });
 renderer.domElement.addEventListener('click', () => {
-  if (!mouse.locked && hud.classList.contains('active')) renderer.domElement.requestPointerLock();
+  if (!mouse.locked && hud.classList.contains('active')) requestGamePointerLock();
+});
+
+// -------------------- MOBILE TOUCH CONTROLS --------------------
+renderer.domElement.style.touchAction = 'none';
+
+const touchLook = { pointerId: null, x: 0, y: 0 };
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (!hud.classList.contains('active') || e.pointerType === 'mouse') return;
+  touchLook.pointerId = e.pointerId;
+  touchLook.x = e.clientX;
+  touchLook.y = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  if (e.pointerId !== touchLook.pointerId) return;
+  mouse.dx += e.clientX - touchLook.x;
+  mouse.dy += e.clientY - touchLook.y;
+  touchLook.x = e.clientX;
+  touchLook.y = e.clientY;
+  e.preventDefault();
+});
+function endTouchLook(e) {
+  if (e.pointerId === touchLook.pointerId) touchLook.pointerId = null;
+}
+renderer.domElement.addEventListener('pointerup', endTouchLook);
+renderer.domElement.addEventListener('pointercancel', endTouchLook);
+
+const movePad = document.getElementById('movePad');
+const stick = { pointerId: null, centerX: 0, centerY: 0, max: 52 };
+
+function setStickPosition(x, y) {
+  movePad.style.setProperty('--stick-x', `${x}px`);
+  movePad.style.setProperty('--stick-y', `${y}px`);
+}
+
+function syncStickKeys(x, y) {
+  const threshold = stick.max * 0.28;
+  setInputKey('touch', 'KeyW', y < -threshold);
+  setInputKey('touch', 'KeyS', y > threshold);
+  setInputKey('touch', 'KeyA', x < -threshold);
+  setInputKey('touch', 'KeyD', x > threshold);
+}
+
+function updateStick(e) {
+  const dx = e.clientX - stick.centerX;
+  const dy = e.clientY - stick.centerY;
+  const dist = Math.hypot(dx, dy);
+  const limited = Math.min(dist, stick.max);
+  const angle = Math.atan2(dy, dx);
+  const x = dist === 0 ? 0 : Math.cos(angle) * limited;
+  const y = dist === 0 ? 0 : Math.sin(angle) * limited;
+  setStickPosition(x, y);
+  syncStickKeys(x, y);
+}
+
+function resetStick() {
+  stick.pointerId = null;
+  setStickPosition(0, 0);
+  syncStickKeys(0, 0);
+  movePad.classList.remove('active');
+}
+
+movePad.addEventListener('pointerdown', e => {
+  if (!hud.classList.contains('active')) return;
+  const rect = movePad.getBoundingClientRect();
+  stick.pointerId = e.pointerId;
+  stick.centerX = rect.left + rect.width / 2;
+  stick.centerY = rect.top + rect.height / 2;
+  stick.max = Math.max(38, Math.min(58, rect.width * 0.34));
+  movePad.setPointerCapture(e.pointerId);
+  movePad.classList.add('active');
+  updateStick(e);
+  e.preventDefault();
+});
+movePad.addEventListener('pointermove', e => {
+  if (e.pointerId !== stick.pointerId) return;
+  updateStick(e);
+  e.preventDefault();
+});
+movePad.addEventListener('pointerup', e => {
+  if (e.pointerId === stick.pointerId) resetStick();
+});
+movePad.addEventListener('pointercancel', e => {
+  if (e.pointerId === stick.pointerId) resetStick();
+});
+
+document.querySelectorAll('[data-touch-key]').forEach(button => {
+  const code = button.dataset.touchKey;
+  button.addEventListener('pointerdown', e => {
+    if (!hud.classList.contains('active')) return;
+    button.setPointerCapture(e.pointerId);
+    button.classList.add('pressed');
+    setInputKey('touch', code, true);
+    e.preventDefault();
+  });
+  const release = e => {
+    if (e.pointerId && button.hasPointerCapture(e.pointerId)) button.releasePointerCapture(e.pointerId);
+    button.classList.remove('pressed');
+    setInputKey('touch', code, false);
+  };
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', release);
+  button.addEventListener('contextmenu', e => e.preventDefault());
+});
+
+function setMobileControlMode(driving, canEnterVehicle) {
+  if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
+  mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
+  mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
+  mobileCarBtn.textContent = driving ? 'EXIT' : (canEnterVehicle ? 'ENTER' : 'CAR');
+  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle);
+}
+
+addEventListener('blur', () => {
+  clearKeySource('keyboard');
+  clearKeySource('touch');
+  resetStick();
 });
 
 let fPressedLast = false;

@@ -240,6 +240,7 @@ function loop() {
   }
   else promptEl.classList.remove('show');
   if (!inVehicle) promptEl.innerHTML = '<kbd>F</kbd>ENTER VEHICLE';
+  setMobileControlMode(!!inVehicle, !!nearestVehicle);
 
   renderer.render(scene, camera);
 }
