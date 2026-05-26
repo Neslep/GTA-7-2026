@@ -3,22 +3,65 @@ const clock = new THREE.Clock();
 
 function updateAITraffic(dt) {
   for (const c of aiCars) {
+    if (c.ignorePlayerTimer > 0) c.ignorePlayerTimer -= dt;
+
+    const playerBlocking = !inVehicle && isPlayerBlockingTraffic(c);
+    if (playerBlocking && c.ignorePlayerTimer <= 0) {
+      if (!c.yieldTimer) c.yieldTimer = 2.4;
+      c.yieldTimer -= dt;
+      if (c.yieldTimer <= 0) {
+        c.yieldTimer = 0;
+        c.ignorePlayerTimer = 2.8;
+      }
+    } else if (!playerBlocking) {
+      c.yieldTimer = 0;
+    }
+
+    const moveSpeed = c.yieldTimer > 0 ? 0 : c.speed;
     if (c.horizontal) {
-      c.group.position.x += c.direction * -1 * c.speed * dt; // -direction matches initial rotation
+      c.group.position.x += c.direction * -1 * moveSpeed * dt; // -direction matches initial rotation
       // wrap
       if (c.group.position.x > HALF + 10) c.group.position.x = -HALF - 10;
       if (c.group.position.x < -HALF - 10) c.group.position.x = HALF + 10;
     } else {
-      c.group.position.z += c.direction * c.speed * dt;
+      c.group.position.z += c.direction * moveSpeed * dt;
       if (c.group.position.z > HALF + 10) c.group.position.z = -HALF - 10;
       if (c.group.position.z < -HALF - 10) c.group.position.z = HALF + 10;
     }
-    for (const w of c.wheels) w.rotation.x += c.speed * dt * 1.8;
+    for (const w of c.wheels) w.rotation.x += moveSpeed * dt * 1.8;
   }
+}
+
+function isPlayerBlockingTraffic(car) {
+  const px = player.group.position.x;
+  const pz = player.group.position.z;
+  if (car.horizontal) {
+    const moveDir = car.direction * -1;
+    const ahead = (px - car.group.position.x) * moveDir;
+    return ahead > 0 && ahead < 11 && Math.abs(pz - car.group.position.z) < 2.6;
+  }
+  const ahead = (pz - car.group.position.z) * car.direction;
+  return ahead > 0 && ahead < 11 && Math.abs(px - car.group.position.x) < 2.6;
 }
 
 function updatePeds(dt) {
   for (const p of peds) {
+    if (p.hitTimer > 0) p.hitTimer -= dt;
+    p.hitFlash.visible = p.hitTimer > 0;
+
+    if (p.downTimer > 0) {
+      p.downTimer -= dt;
+      p.leftLeg.rotation.x = -0.25;
+      p.rightLeg.rotation.x = 0.25;
+      p.leftArm.rotation.x = 0.35;
+      p.rightArm.rotation.x = -0.35;
+      if (p.downTimer <= 0) {
+        p.group.rotation.z = 0;
+        p.health = 100;
+      }
+      continue;
+    }
+
     p.turnTimer -= dt;
     if (p.turnTimer <= 0) {
       p.turnTimer = 2 + Math.random()*4;
@@ -35,7 +78,10 @@ function updatePeds(dt) {
     p.group.rotation.y = p.dir;
     // walk bob
     p.walkPhase += dt * p.speed * 2;
-    p.legs.rotation.x = Math.sin(p.walkPhase) * 0.5;
+    p.leftLeg.rotation.x = Math.sin(p.walkPhase) * 0.45;
+    p.rightLeg.rotation.x = -Math.sin(p.walkPhase) * 0.45;
+    p.leftArm.rotation.x = -Math.sin(p.walkPhase) * 0.35;
+    p.rightArm.rotation.x = Math.sin(p.walkPhase) * 0.35;
     p.body.position.y = 1.1 + Math.abs(Math.sin(p.walkPhase)) * 0.03;
   }
 }
@@ -45,7 +91,8 @@ function updateCamera(dt) {
   if (inVehicle) {
     const v = inVehicle;
     // Camera follow vehicle
-    const dist = 9, height = 4.5;
+    const dist = v.kind === 'bike' ? 7 : 9;
+    const height = v.kind === 'bike' ? 3.4 : 4.5;
     // free orbit yaw added to vehicle yaw
     const camDirY = v.group.rotation.y + camYaw.v;
     targetX = v.group.position.x - Math.sin(camDirY) * dist;
@@ -76,22 +123,32 @@ function tryEnterExit() {
   if (inVehicle) {
     // Exit
     const v = inVehicle;
-    const exitOff = 2.2;
+    const exitOff = v.kind === 'bike' ? 1.5 : 2.2;
     const ex = v.group.position.x - Math.cos(v.group.rotation.y) * 0.5 + Math.sin(v.group.rotation.y + Math.PI/2) * exitOff;
     const ez = v.group.position.z - Math.sin(v.group.rotation.y) * 0.5 + Math.cos(v.group.rotation.y + Math.PI/2) * exitOff;
     player.group.visible = true;
     player.group.position.set(ex, 0, ez);
     player.yaw = v.group.rotation.y;
     player.group.rotation.y = player.yaw;
+    player.group.rotation.z = 0;
+    player.body.rotation.x = 0;
+    player.head.rotation.x = 0;
+    player.leftArm.rotation.set(0, 0, 0);
+    player.rightArm.rotation.set(0, 0, 0);
+    player.leftLeg.rotation.set(0, 0, 0);
+    player.rightLeg.rotation.set(0, 0, 0);
+    player.heldItem.visible = true;
     v.occupied = false;
     inVehicle = null;
+    v.group.rotation.z = 0;
     document.getElementById('mode').textContent = 'ON FOOT';
     document.getElementById('speedo').classList.remove('show');
-  } else if (nearestVehicle) {
-    inVehicle = nearestVehicle;
+  } else if (nearestVehicle || nearestTrafficVehicle) {
+    inVehicle = nearestVehicle || hijackTrafficVehicle(nearestTrafficVehicle);
     inVehicle.occupied = true;
-    player.group.visible = false;
-    document.getElementById('mode').textContent = 'DRIVING';
+    player.group.visible = inVehicle.kind === 'bike';
+    player.heldItem.visible = inVehicle.kind !== 'bike';
+    document.getElementById('mode').textContent = inVehicle.kind === 'bike' ? 'RIDING' : 'DRIVING';
     document.getElementById('speedo').classList.add('show');
     // Reset cam yaw relative to vehicle
     camYaw.v = 0;
@@ -108,6 +165,31 @@ function findNearestVehicle() {
     if (d < best) { best = d; nearest = v; }
   }
   return nearest;
+}
+
+function findNearestTrafficVehicle() {
+  let nearest = null, best = 4.8;
+  for (const v of aiCars) {
+    const dx = v.group.position.x - player.group.position.x;
+    const dz = v.group.position.z - player.group.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d < best) { best = d; nearest = v; }
+  }
+  return nearest;
+}
+
+function hijackTrafficVehicle(car) {
+  const idx = aiCars.indexOf(car);
+  if (idx !== -1) aiCars.splice(idx, 1);
+  car.isAI = false;
+  car.kind = car.kind || 'car';
+  car.occupied = false;
+  car.velocity = car.speed || 10;
+  car.angularVelocity = 0;
+  vehicles.push(car);
+  nearestTrafficVehicle = null;
+  nearestVehicle = car;
+  return car;
 }
 
 // -------------------- MINIMAP --------------------
@@ -157,8 +239,14 @@ function drawMinimap() {
   for (const v of vehicles) {
     if (v === inVehicle) continue;
     const [x, y] = w2m(v.group.position.x, v.group.position.z);
-    mmCtx.fillStyle = '#88c8ff';
-    mmCtx.fillRect(x-2, y-2, 4, 4);
+    mmCtx.fillStyle = v.kind === 'bike' ? '#ffd200' : '#88c8ff';
+    if (v.kind === 'bike') {
+      mmCtx.beginPath();
+      mmCtx.arc(x, y, 2.5, 0, Math.PI * 2);
+      mmCtx.fill();
+    } else {
+      mmCtx.fillRect(x-2, y-2, 4, 4);
+    }
   }
   // AI cars
   mmCtx.fillStyle = '#ff7030';
@@ -202,6 +290,7 @@ function loop() {
   } else {
     updatePlayer(dt);
     nearestVehicle = findNearestVehicle();
+    nearestTrafficVehicle = nearestVehicle ? null : findNearestTrafficVehicle();
   }
   updateAITraffic(dt);
   updatePeds(dt);
@@ -233,14 +322,17 @@ function loop() {
   vnearEl.textContent = count;
 
   // Prompt
-  if (!inVehicle && nearestVehicle) promptEl.classList.add('show');
+  promptEl.classList.toggle('vehicle-mode', !!inVehicle);
+  if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
+  }
   else if (inVehicle) {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
   }
   else promptEl.classList.remove('show');
-  if (!inVehicle) promptEl.innerHTML = '<kbd>F</kbd>ENTER VEHICLE';
-  setMobileControlMode(!!inVehicle, !!nearestVehicle);
+  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle);
 
   renderer.render(scene, camera);
 }

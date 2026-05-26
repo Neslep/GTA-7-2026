@@ -99,6 +99,11 @@
     opacity: 0; transition: opacity 0.2s;
   }
   #prompt.show { opacity: 1; }
+  #prompt.vehicle-mode {
+    left: 50%;
+    bottom: 128px;
+    transform: translateX(-50%);
+  }
   #prompt kbd { background: #0a0a12; color: #ffd200; padding: 2px 8px; margin-right: 8px; }
 
   /* Crosshair */
@@ -232,6 +237,7 @@
     background: rgba(255, 210, 0, 0.26);
   }
   #mobileCarBtn { grid-column: 2; grid-row: 1; }
+  #mobileHitBtn { grid-column: 1; grid-row: 1; }
   #mobileRunBtn { grid-column: 1; grid-row: 2; }
   #mobileJumpBtn { grid-column: 2; grid-row: 2; }
 
@@ -283,6 +289,11 @@
       font-size: 11px;
       letter-spacing: 2px;
       text-align: center;
+    }
+    #prompt.vehicle-mode {
+      bottom: calc(164px + env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%);
     }
     .crosshair { opacity: 0.45; }
   }
