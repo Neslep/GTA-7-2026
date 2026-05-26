@@ -311,11 +311,14 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
+  if (blackjackActive) return;
   if (hijackState) return;
   if (nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
     startMission(nearestMissionStart);
+  } else if (canPlayBlackjack()) {
+    openBlackjack();
   } else if (activeLocation) {
     exitLocation();
   } else if (!inVehicle && nearestLocation) {
@@ -715,7 +718,15 @@ function loop() {
   const dt = Math.min(0.05, clock.getDelta());
   frame++;
 
-  if (hijackState) {
+  if (blackjackActive) {
+    nearestVehicle = null;
+    nearestTrafficVehicle = null;
+    nearestLocation = null;
+    nearestMissionStart = null;
+    nearestServiceLocation = null;
+    mouse.dx = 0;
+    mouse.dy = 0;
+  } else if (hijackState) {
     updateHijackSequence(dt);
     nearestVehicle = null;
     nearestTrafficVehicle = null;
@@ -810,6 +821,10 @@ function loop() {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>START MISSION';
   }
+  else if (canPlayBlackjack()) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>PLAY BLACKJACK';
+  }
   else if (activeLocation) {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>EXIT TO STREET';
@@ -828,8 +843,9 @@ function loop() {
   }
   else promptEl.classList.remove('show');
   const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
-  const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
-  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
+  const blackjackReady = canPlayBlackjack();
+  const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (blackjackReady ? 'PLAY' : (activeLocation ? 'EXIT' : 'ENTER')));
+  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady || blackjackReady), useLabel);
 
   renderer.render(scene, camera);
 }

@@ -22,7 +22,7 @@ addEventListener('mousemove', e => {
   if (mouse.locked) { mouse.dx += e.movementX; mouse.dy += e.movementY; }
 });
 addEventListener('mousedown', e => {
-  if (e.button === 0 && hud.classList.contains('active') && !inVehicle) setInputKey('keyboard', 'KeyE', true);
+  if (e.button === 0 && hud.classList.contains('active') && !inVehicle && !blackjackActive) setInputKey('keyboard', 'KeyE', true);
 });
 addEventListener('mouseup', e => {
   if (e.button === 0) setInputKey('keyboard', 'KeyE', false);
@@ -61,7 +61,7 @@ renderer.domElement.style.touchAction = 'none';
 
 const touchLook = { pointerId: null, x: 0, y: 0 };
 renderer.domElement.addEventListener('pointerdown', e => {
-  if (!hud.classList.contains('active') || e.pointerType === 'mouse') return;
+  if (!hud.classList.contains('active') || blackjackActive || e.pointerType === 'mouse') return;
   touchLook.pointerId = e.pointerId;
   touchLook.x = e.clientX;
   touchLook.y = e.clientY;
@@ -118,7 +118,7 @@ function resetStick() {
 }
 
 movePad.addEventListener('pointerdown', e => {
-  if (!hud.classList.contains('active')) return;
+  if (!hud.classList.contains('active') || blackjackActive) return;
   const rect = movePad.getBoundingClientRect();
   stick.pointerId = e.pointerId;
   stick.centerX = rect.left + rect.width / 2;
@@ -144,7 +144,7 @@ movePad.addEventListener('pointercancel', e => {
 document.querySelectorAll('[data-touch-key]').forEach(button => {
   const code = button.dataset.touchKey;
   button.addEventListener('pointerdown', e => {
-    if (!hud.classList.contains('active')) return;
+    if (!hud.classList.contains('active') || blackjackActive) return;
     button.setPointerCapture(e.pointerId);
     button.classList.add('pressed');
     setInputKey('touch', code, true);
@@ -205,6 +205,16 @@ let lastPos = new Vector3();
 let hijackState = null;
 const activeProjectiles = [];
 const activeEffects = [];
+let blackjackActive = false;
+let blackjackRound = 'idle';
+let blackjackDeck = [];
+let blackjackPlayerHand = [];
+let blackjackDealerHand = [];
+let blackjackDealerRevealed = false;
+let playerCash = 500;
+let casinoBet = 50;
+let blackjackRoundBet = 50;
+let casinoResult = 'Press New Round to deal.';
 
 const missionCatalog = [
   { id: 'bank-delivery', name: 'Bank Delivery', startId: 'bank', targetId: 'garage', seconds: 70, reward: 1200, objective: 'Deliver the bank package to the garage.' },
@@ -569,6 +579,242 @@ function useServiceLocation(loc) {
   }
   return false;
 }
+
+function canPlayBlackjack() {
+  if (!activeLocation || activeLocation.type !== 'casino' || blackjackActive || inVehicle) return false;
+  if (!activeLocation.blackjackPos) return true;
+  const dx = player.group.position.x - activeLocation.blackjackPos.x;
+  const dz = player.group.position.z - activeLocation.blackjackPos.z;
+  return Math.hypot(dx, dz) < 8.2;
+}
+
+function getBlackjackEls() {
+  return {
+    overlay: document.getElementById('blackjackOverlay'),
+    cash: document.getElementById('blackjackCash'),
+    bet: document.getElementById('blackjackBet'),
+    result: document.getElementById('blackjackResult'),
+    dealerScore: document.getElementById('dealerScore'),
+    playerScore: document.getElementById('playerScore'),
+    dealerHand: document.getElementById('dealerHand'),
+    playerHand: document.getElementById('playerHand'),
+    hit: document.getElementById('blackjackHitBtn'),
+    stand: document.getElementById('blackjackStandBtn'),
+    double: document.getElementById('blackjackDoubleBtn'),
+    next: document.getElementById('blackjackNewBtn'),
+    exit: document.getElementById('blackjackExitBtn'),
+  };
+}
+
+function openBlackjack() {
+  if (!activeLocation || activeLocation.type !== 'casino') return;
+  blackjackActive = true;
+  clearKeySource('keyboard');
+  clearKeySource('touch');
+  resetStick();
+  document.body.classList.add('blackjack-open');
+  const { overlay } = getBlackjackEls();
+  if (overlay) {
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+  }
+  if (!blackjackPlayerHand.length || blackjackRound === 'done') startBlackjackRound();
+  else renderBlackjack();
+}
+
+function closeBlackjack() {
+  blackjackActive = false;
+  clearKeySource('keyboard');
+  clearKeySource('touch');
+  resetStick();
+  document.body.classList.remove('blackjack-open');
+  const { overlay } = getBlackjackEls();
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function makeBlackjackDeck() {
+  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const suits = ['♠', '♥', '♦', '♣'];
+  const deck = [];
+  for (const suit of suits) {
+    for (const rank of ranks) deck.push({ rank, suit });
+  }
+  return deck;
+}
+
+function shuffleDeck(deck) {
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function drawCard() {
+  if (blackjackDeck.length < 12) blackjackDeck = shuffleDeck(makeBlackjackDeck());
+  return blackjackDeck.pop();
+}
+
+function scoreHand(hand) {
+  let score = 0;
+  let aces = 0;
+  for (const card of hand) {
+    if (card.rank === 'A') {
+      score += 11;
+      aces++;
+    } else if (card.rank === 'J' || card.rank === 'Q' || card.rank === 'K') {
+      score += 10;
+    } else {
+      score += Number(card.rank);
+    }
+  }
+  while (score > 21 && aces > 0) {
+    score -= 10;
+    aces--;
+  }
+  return score;
+}
+
+function isBlackjack(hand) {
+  return hand.length === 2 && scoreHand(hand) === 21;
+}
+
+function startBlackjackRound() {
+  if (playerCash < casinoBet) {
+    blackjackRound = 'idle';
+    casinoResult = `Need $${casinoBet} to sit at this table.`;
+    renderBlackjack();
+    return;
+  }
+  blackjackRound = 'active';
+  blackjackRoundBet = casinoBet;
+  casinoResult = 'Hit, stand, or double.';
+  blackjackDealerRevealed = false;
+  blackjackDeck = shuffleDeck(makeBlackjackDeck());
+  blackjackPlayerHand = [drawCard(), drawCard()];
+  blackjackDealerHand = [drawCard(), drawCard()];
+
+  const playerNat = isBlackjack(blackjackPlayerHand);
+  const dealerNat = isBlackjack(blackjackDealerHand);
+  if (playerNat || dealerNat) {
+    blackjackDealerRevealed = true;
+    if (playerNat && dealerNat) finishBlackjackRound('push');
+    else if (playerNat) finishBlackjackRound('blackjack');
+    else finishBlackjackRound('lose');
+    return;
+  }
+  renderBlackjack();
+}
+
+function blackjackHit() {
+  if (blackjackRound !== 'active') return;
+  blackjackPlayerHand.push(drawCard());
+  const playerScore = scoreHand(blackjackPlayerHand);
+  if (playerScore > 21) finishBlackjackRound('bust');
+  else renderBlackjack();
+}
+
+function blackjackStand() {
+  if (blackjackRound !== 'active') return;
+  blackjackDealerRevealed = true;
+  while (scoreHand(blackjackDealerHand) < 17) blackjackDealerHand.push(drawCard());
+  const playerScore = scoreHand(blackjackPlayerHand);
+  const dealerScore = scoreHand(blackjackDealerHand);
+  if (dealerScore > 21) finishBlackjackRound('win');
+  else if (playerScore > dealerScore) finishBlackjackRound('win');
+  else if (playerScore < dealerScore) finishBlackjackRound('lose');
+  else finishBlackjackRound('push');
+}
+
+function blackjackDouble() {
+  if (blackjackRound !== 'active' || blackjackPlayerHand.length !== 2) return;
+  if (playerCash < blackjackRoundBet * 2) {
+    casinoResult = `Need $${blackjackRoundBet * 2} cash to double.`;
+    renderBlackjack();
+    return;
+  }
+  blackjackRoundBet *= 2;
+  blackjackPlayerHand.push(drawCard());
+  if (scoreHand(blackjackPlayerHand) > 21) finishBlackjackRound('bust');
+  else blackjackStand();
+}
+
+function finishBlackjackRound(result) {
+  blackjackRound = 'done';
+  blackjackDealerRevealed = true;
+  let cashDelta = 0;
+  if (result === 'blackjack') {
+    cashDelta = Math.floor(blackjackRoundBet * 1.5);
+    casinoResult = `BLACKJACK! You win $${cashDelta}.`;
+  } else if (result === 'win') {
+    cashDelta = blackjackRoundBet;
+    casinoResult = `WIN. You take $${cashDelta}.`;
+  } else if (result === 'lose') {
+    cashDelta = -blackjackRoundBet;
+    casinoResult = `LOSE. Dealer takes $${blackjackRoundBet}.`;
+  } else if (result === 'bust') {
+    cashDelta = -blackjackRoundBet;
+    casinoResult = `BUST. You lose $${blackjackRoundBet}.`;
+  } else {
+    casinoResult = 'PUSH. Bet returned.';
+  }
+  playerCash = Math.max(0, playerCash + cashDelta);
+  renderBlackjack();
+}
+
+function makeBlackjackCardEl(card, hidden = false) {
+  const el = document.createElement('div');
+  el.className = `playing-card${hidden ? ' hidden' : ''}${!hidden && (card.suit === '♥' || card.suit === '♦') ? ' red' : ''}`;
+  if (hidden) {
+    el.innerHTML = '<div class="card-rank">?</div><div class="card-suit">◆</div><div class="card-foot">?</div>';
+    return el;
+  }
+  el.innerHTML = `<div class="card-rank">${card.rank}</div><div class="card-suit">${card.suit}</div><div class="card-foot">${card.rank}</div>`;
+  return el;
+}
+
+function renderBlackjack() {
+  const els = getBlackjackEls();
+  if (!els.overlay) return;
+  els.cash.textContent = `$${playerCash}`;
+  els.bet.textContent = `$${blackjackRoundBet || casinoBet}`;
+  els.result.textContent = casinoResult;
+  els.playerScore.textContent = scoreHand(blackjackPlayerHand);
+  els.dealerScore.textContent = blackjackDealerRevealed ? scoreHand(blackjackDealerHand) : '?';
+  els.playerHand.replaceChildren(...blackjackPlayerHand.map(card => makeBlackjackCardEl(card)));
+  els.dealerHand.replaceChildren(...blackjackDealerHand.map((card, i) => makeBlackjackCardEl(card, !blackjackDealerRevealed && i === 0)));
+  const active = blackjackRound === 'active';
+  els.hit.disabled = !active;
+  els.stand.disabled = !active;
+  els.double.disabled = !active || blackjackPlayerHand.length !== 2 || playerCash < blackjackRoundBet * 2;
+  els.next.disabled = active || playerCash < casinoBet;
+}
+
+function bindBlackjackControls() {
+  const els = getBlackjackEls();
+  if (!els.overlay || els.overlay.dataset.bound === 'true') return;
+  els.hit.addEventListener('click', blackjackHit);
+  els.stand.addEventListener('click', blackjackStand);
+  els.double.addEventListener('click', blackjackDouble);
+  els.next.addEventListener('click', startBlackjackRound);
+  els.exit.addEventListener('click', closeBlackjack);
+  els.overlay.addEventListener('pointerdown', e => e.stopPropagation());
+  els.overlay.dataset.bound = 'true';
+}
+
+bindBlackjackControls();
+
+addEventListener('keydown', e => {
+  if (!blackjackActive) return;
+  if (e.code === 'Escape') closeBlackjack();
+  if (e.code === 'KeyH') blackjackHit();
+  if (e.code === 'KeyS') blackjackStand();
+  if (e.code === 'KeyD') blackjackDouble();
+  if (e.code === 'KeyN') startBlackjackRound();
+});
 
 function spawnPoliceCar() {
   if (policeCars.length >= Math.min(3, Math.max(1, wantedLevel))) return;
@@ -992,6 +1238,12 @@ function updateBikeRiderPose(veh) {
 
 // -------------------- UPDATE LOOPS --------------------
 function updatePlayer(dt) {
+  if (blackjackActive) {
+    mouse.dx = 0;
+    mouse.dy = 0;
+    ePressedLast = false;
+    return;
+  }
   // Mouse look
   camYaw.v -= mouse.dx * 0.0025;
   camPitch.v -= mouse.dy * 0.0025;

@@ -103,6 +103,45 @@
   </div>
 </div>
 
+<div id="blackjackOverlay" aria-hidden="true">
+  <div class="blackjack-panel">
+    <div class="blackjack-top">
+      <div>
+        <div class="blackjack-kicker">CASINO TABLE</div>
+        <div class="blackjack-title">XI DACH / BLACKJACK</div>
+      </div>
+      <button id="blackjackExitBtn" class="blackjack-close" type="button">EXIT</button>
+    </div>
+
+    <div class="blackjack-bank">
+      <span>CASH <b id="blackjackCash">$500</b></span>
+      <span>BET <b id="blackjackBet">$50</b></span>
+      <span>PAYS <b>BLACKJACK 3:2</b></span>
+    </div>
+
+    <div id="blackjackResult" class="blackjack-result">Press New Round to deal.</div>
+
+    <div class="blackjack-table">
+      <section class="blackjack-hand-zone">
+        <div class="hand-head"><span>Dealer</span><b id="dealerScore">0</b></div>
+        <div id="dealerHand" class="card-row"></div>
+      </section>
+
+      <section class="blackjack-hand-zone player-zone">
+        <div class="hand-head"><span>Player</span><b id="playerScore">0</b></div>
+        <div id="playerHand" class="card-row"></div>
+      </section>
+    </div>
+
+    <div class="blackjack-actions">
+      <button id="blackjackHitBtn" type="button">Hit</button>
+      <button id="blackjackStandBtn" type="button">Stand</button>
+      <button id="blackjackDoubleBtn" type="button">Double</button>
+      <button id="blackjackNewBtn" type="button">New Round</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="src/js/core.js"></script>
 <script src="src/js/world.js"></script>
