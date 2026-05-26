@@ -279,7 +279,7 @@ for (let i = 0; i < PARKED; i++) {
   });
 }
 
-const PARKED_BIKES = 7;
+const PARKED_BIKES = 10;
 for (let i = 0; i < PARKED_BIKES; i++) {
   const col = bikeColors[Math.floor(Math.random()*bikeColors.length)];
   const bike = makeMotorbike(col);
@@ -313,7 +313,7 @@ for (let i = 0; i < PARKED_BIKES; i++) {
 
 // -------------------- AI TRAFFIC --------------------
 const aiCars = [];
-const TRAFFIC_COUNT = 18;
+const TRAFFIC_COUNT = 22;
 for (let i = 0; i < TRAFFIC_COUNT; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const roll = Math.random();
@@ -332,8 +332,12 @@ for (let i = 0; i < TRAFFIC_COUNT; i++) {
     car.group.position.set(-HALF + laneIndex * BLOCK + laneOff, 0, startPos);
     car.group.rotation.y = direction > 0 ? 0 : Math.PI;
   }
+  const district = getDistrictAt(car.group.position.x, car.group.position.z);
+  const districtSpeedBoost = district.id === 'downtown' ? 2 : (district.id === 'industrial' ? -2 : 0);
+  const baseSpeed = car.kind === 'truck' ? 5 : 8;
+  const speedRange = car.kind === 'truck' ? 5 : 8;
   aiCars.push({
-    ...car, horizontal, laneIndex, direction, speed: (car.kind === 'truck' ? 5 : 8) + Math.random() * (car.kind === 'truck' ? 5 : 8),
+    ...car, horizontal, laneIndex, direction, speed: Math.max(3, baseSpeed + districtSpeedBoost + Math.random() * speedRange),
     laneOff
   });
 }
@@ -411,7 +415,7 @@ function makePed() {
   return { group: g, body, head, legs, leftLeg, rightLeg, arms, leftArm, rightArm, hitFlash };
 }
 const peds = [];
-const PED_COUNT = 22;
+const PED_COUNT = 34;
 for (let i = 0; i < PED_COUNT; i++) {
   const p = makePed();
   // Place on a random sidewalk
@@ -420,6 +424,11 @@ for (let i = 0; i < PED_COUNT; i++) {
   const cx0 = -HALF + bx * BLOCK + BLOCK/2;
   const cz0 = -HALF + bz * BLOCK + BLOCK/2;
   p.group.position.set(cx0 + (Math.random()-0.5)*BLOCK*0.6, 0, cz0 + (Math.random()-0.5)*BLOCK*0.6);
+  const district = getDistrictAt(p.group.position.x, p.group.position.z);
+  if (district.id === 'industrial' && Math.random() < 0.45) {
+    p.group.position.x = 60 + Math.random() * 70;
+    p.group.position.z = 60 + Math.random() * 70;
+  }
   const dir = Math.random() * Math.PI * 2;
   p.group.rotation.y = dir;
   scene.add(p.group);

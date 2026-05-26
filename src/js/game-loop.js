@@ -163,7 +163,27 @@ function updateLocationAlert(dt) {
 }
 
 function updateLocationEffects(dt) {
+  for (let i = 0; i < cityBillboards.length; i++) {
+    const board = cityBillboards[i];
+    if (board.material) board.material.opacity = 0.68 + Math.abs(Math.sin(frame * 0.035 + i)) * 0.32;
+  }
+  const ref = getPlayerRefPosition();
+  for (const lamp of cityStreetLamps) {
+    const d = Math.hypot(lamp.group.position.x - ref.x, lamp.group.position.z - ref.z);
+    const nearBoost = d < 34 ? 0.55 : 0;
+    const alertBoost = wantedLevel > 0 || bankAlarm ? 0.45 : 0;
+    if (lamp.bulb.material) lamp.bulb.material.emissiveIntensity = 1.2 + nearBoost + alertBoost;
+  }
   for (const loc of cityLocations) {
+    if (loc.light) {
+      loc.light.intensity = (loc.light.baseIntensity || loc.light.intensity || 1.2) *
+        (0.88 + Math.abs(Math.sin(frame * 0.035 + loc.x * 0.01)) * 0.18);
+      loc.light.baseIntensity = loc.light.baseIntensity || loc.light.intensity;
+    }
+    if (loc.beacon && loc.beacon.material) {
+      loc.beacon.material.emissiveIntensity = Math.sin(frame * 0.12) > 0 ? 2.8 : 0.4;
+      loc.beacon.visible = Math.sin(frame * 0.12) > -0.2;
+    }
     if (loc.type === 'bar' && loc.danceFloor) {
       const glow = 0.35 + Math.abs(Math.sin(frame * 0.08)) * 0.85;
       loc.danceFloor.material.emissiveIntensity = glow;
@@ -174,6 +194,87 @@ function updateLocationEffects(dt) {
       }
     }
   }
+}
+
+function flashObjectivePanel() {
+  if (!objectivePanelEl) return;
+  objectivePanelEl.classList.remove('flash');
+  void objectivePanelEl.offsetWidth;
+  objectivePanelEl.classList.add('flash');
+}
+
+function triggerScreenFlash(type = 'impact') {
+  if (!screenFlashEl) return;
+  screenFlashEl.className = '';
+  void screenFlashEl.offsetWidth;
+  screenFlashEl.classList.add(`flash-${type}`);
+}
+
+function setHudAlertState(active) {
+  if (!hud) return;
+  hud.classList.toggle('alert-state', active);
+}
+
+function ensureVehicleVisualEffects(veh) {
+  if (!veh || veh.visualFxReady) return;
+  const trailMat = new MeshBasicMaterial({ color: 0xffd200, transparent: true, opacity: 0.0 });
+  const trail = new Mesh(new BoxGeometry(1.7, 0.08, 3.2), trailMat);
+  trail.position.set(0, 0.38, -2.8);
+  veh.group.add(trail);
+
+  const skidMat = new MeshBasicMaterial({ color: 0x111114, transparent: true, opacity: 0.0 });
+  const leftSkid = new Mesh(new BoxGeometry(0.18, 0.03, 2.6), skidMat.clone());
+  const rightSkid = new Mesh(new BoxGeometry(0.18, 0.03, 2.6), skidMat.clone());
+  leftSkid.position.set(-0.72, 0.04, -2.2);
+  rightSkid.position.set(0.72, 0.04, -2.2);
+  veh.group.add(leftSkid, rightSkid);
+
+  veh.visualTrail = trail;
+  veh.visualSkids = [leftSkid, rightSkid];
+  veh.visualFxReady = true;
+}
+
+function updateVehicleEffects(dt, veh) {
+  if (!veh) return;
+  ensureVehicleVisualEffects(veh);
+  const boosting = (keys['ShiftLeft'] || keys['ShiftRight']) && Math.abs(veh.velocity || 0) > 6;
+  const braking = keys['Space'] && Math.abs(veh.velocity || 0) > 5;
+  if (veh.visualTrail) {
+    veh.visualTrail.material.opacity += ((boosting ? 0.36 : 0) - veh.visualTrail.material.opacity) * Math.min(1, dt * 8);
+    veh.visualTrail.scale.z = 0.8 + Math.min(2.0, Math.abs(veh.velocity || 0) / 20);
+  }
+  if (veh.visualSkids) {
+    for (const skid of veh.visualSkids) {
+      skid.material.opacity += ((braking ? 0.42 : 0) - skid.material.opacity) * Math.min(1, dt * 10);
+    }
+  }
+  if (veh.smoke) {
+    veh.smoke.visible = veh.health < 45;
+    veh.smoke.rotation.y += dt * (veh.health < 25 ? 3.6 : 1.5);
+    veh.smoke.scale.setScalar(veh.health < 25 ? 1.55 : 1);
+  }
+  const hazard = veh.health < 28 && Math.sin(frame * 0.28) > 0;
+  if (veh.body && veh.body.material) veh.body.material.emissiveIntensity = hazard ? 0.25 : 0;
+}
+
+function updateHudEffects(dt) {
+  const vehicleHealth = inVehicle && typeof inVehicle.health === 'number' ? inVehicle.health : 100;
+  const danger = wantedLevel > 0 || bankAlarm || (inVehicle && vehicleHealth < 35);
+  setHudAlertState(wantedLevel > 0 || bankAlarm);
+  hud.classList.toggle('danger-vignette', !!danger);
+  if (minimapWrapEl) minimapWrapEl.classList.toggle('wanted', wantedLevel > 0 || bankAlarm);
+  if (vehicleHealthBarEl) {
+    const scale = Math.max(0, Math.min(1, vehicleHealth / 100));
+    vehicleHealthBarEl.style.transform = `scaleX(${scale})`;
+    vehicleHealthBarEl.classList.toggle('low', scale < 0.35);
+  }
+}
+
+function updateDistrictLabel() {
+  if (!districtLabelEl) return;
+  const ref = getPlayerRefPosition();
+  const district = getDistrictAt(ref.x, ref.z);
+  districtLabelEl.textContent = district.label;
 }
 
 function updateCamera(dt) {
@@ -232,7 +333,7 @@ function updateCamera(dt) {
 function tryEnterExit() {
   if (jailTimer > 0 || arrestState) return;
   if (hijackState) return;
-  if (nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
+  if (nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
     startMission(nearestMissionStart);
@@ -572,6 +673,16 @@ function drawMinimap() {
   mmCtx.save();
   mmCtx.translate(mmSize/2, mmSize/2);
   mmCtx.rotate(-(inVehicle ? inVehicle.group.rotation.y : player.yaw));
+  mmCtx.shadowColor = wantedLevel > 0 ? '#ff5900' : '#ffd200';
+  mmCtx.shadowBlur = 10;
+  mmCtx.strokeStyle = '#101018';
+  mmCtx.lineWidth = 2;
+  mmCtx.beginPath();
+  mmCtx.moveTo(0, -8);
+  mmCtx.lineTo(6, 6);
+  mmCtx.lineTo(-6, 6);
+  mmCtx.closePath();
+  mmCtx.stroke();
   mmCtx.fillStyle = '#ffd200';
   mmCtx.beginPath();
   mmCtx.moveTo(0, -7);
@@ -594,7 +705,10 @@ function drawMissionMarker(w2m) {
   mmCtx.translate(x, y);
   mmCtx.rotate(frame * 0.06);
   mmCtx.strokeStyle = '#ffd200';
-  mmCtx.lineWidth = 2;
+  mmCtx.globalAlpha = 0.55 + Math.abs(Math.sin(frame * 0.12)) * 0.45;
+  mmCtx.shadowColor = '#ffd200';
+  mmCtx.shadowBlur = 8;
+  mmCtx.lineWidth = 2.5;
   mmCtx.beginPath();
   mmCtx.moveTo(0, -9);
   mmCtx.lineTo(9, 0);
@@ -617,6 +731,10 @@ const objectiveTitleEl = document.getElementById('objectiveTitle');
 const objectiveTextEl = document.getElementById('objectiveText');
 const objectiveTimerEl = document.getElementById('objectiveTimer');
 const objectiveWantedEl = document.getElementById('objectiveWanted');
+const screenFlashEl = document.getElementById('screenFlash');
+const vehicleHealthBarEl = document.getElementById('vehicleHealthBar');
+const minimapWrapEl = document.getElementById('minimap-wrap');
+const districtLabelEl = document.getElementById('districtLabel');
 let frame = 0;
 
 function loop() {
@@ -640,6 +758,7 @@ function loop() {
     nearestServiceLocation = null;
   } else if (inVehicle) {
     updateVehicle(dt, inVehicle);
+    updateVehicleEffects(dt, inVehicle);
     nearestServiceLocation = findNearestServiceLocation();
     nearestMissionStart = null;
   } else {
@@ -695,6 +814,8 @@ function loop() {
     objectiveTimerEl.textContent = activeMission && activeMission.status === 'active' ? `${Math.ceil(missionTimer)}s` : '';
     objectiveWantedEl.textContent = wantedLevel > 0 ? `WANTED ${wantedLevel}` : '';
   }
+  updateHudEffects(dt);
+  updateDistrictLabel();
   // Count nearby vehicles
   let count = 0;
   for (const v of vehicles) {
@@ -725,6 +846,10 @@ function loop() {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>SHOP ITEM';
   }
+  else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>PATCH UP';
+  }
   else if (nearestMissionStart) {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>START MISSION';
@@ -746,7 +871,7 @@ function loop() {
     promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
   }
   else promptEl.classList.remove('show');
-  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation));
+  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
   const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
   setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
 

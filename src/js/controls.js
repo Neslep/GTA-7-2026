@@ -164,7 +164,7 @@ function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
   mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
   mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
-  mobileCarBtn.textContent = driving ? 'EXIT' : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
+  mobileCarBtn.textContent = driving ? (canUseLocation ? locationLabel : 'EXIT') : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
   mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle || canUseLocation);
 }
 
@@ -212,6 +212,9 @@ const activeEffects = [];
 const missionCatalog = [
   { id: 'bank-delivery', name: 'Bank Delivery', startId: 'bank', targetId: 'garage', seconds: 70, reward: 1200, objective: 'Deliver the bank package to the garage.' },
   { id: 'club-pickup', name: 'Club Pickup', startId: 'nightclub', targetId: 'shop', seconds: 65, reward: 850, objective: 'Pick up the club parcel and reach the shop.' },
+  { id: 'airport-run', name: 'Airport Run', startId: 'hotel', targetId: 'airport', seconds: 90, reward: 1600, objective: 'Move the VIP package from the hotel to the helipad.' },
+  { id: 'harbor-drop', name: 'Harbor Drop', startId: 'harbor', targetId: 'radio', seconds: 85, reward: 1350, objective: 'Carry the dock manifest to the radio station.' },
+  { id: 'emergency-ride', name: 'Emergency Ride', startId: 'hospital', targetId: 'fire', seconds: 75, reward: 1100, objective: 'Run emergency supplies to the fire station.' },
 ];
 
 // -------------------- COLLISION HELPER --------------------
@@ -251,6 +254,10 @@ function findNearestLocation() {
 
 function canUseShopService(loc) {
   return !!loc && loc.type === 'shop' && !inVehicle && !activeLocation && !nearestMissionStart;
+}
+
+function canUseOnFootService(loc) {
+  return !!loc && (loc.type === 'shop' || loc.type === 'hospital') && !inVehicle && !activeLocation && !nearestMissionStart;
 }
 
 function getLocationById(id) {
@@ -293,6 +300,7 @@ function startMission(missionDef) {
   missionReward = missionDef.reward;
   missionStatusTimer = 0;
   document.getElementById('mode').textContent = 'MISSION';
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function completeMission(text = 'MISSION COMPLETE') {
@@ -306,6 +314,8 @@ function completeMission(text = 'MISSION COMPLETE') {
   missionStatusTimer = 3.5;
   missionTarget = null;
   missionTimer = 0;
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('success');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
   if (!inVehicle && !activeLocation) document.getElementById('mode').textContent = wantedLevel > 0 ? 'WANTED' : 'ON FOOT';
 }
 
@@ -316,6 +326,8 @@ function failMission(text = 'MISSION FAILED') {
   missionStatusTimer = 3.5;
   missionTarget = null;
   missionTimer = 0;
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('fail');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function startEscapeHeatMission() {
@@ -430,6 +442,8 @@ function triggerBankAlarm() {
   missionTimer = 80;
   missionReward = 0;
   document.getElementById('mode').textContent = 'BANK ALARM';
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('alarm');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function tryBankVaultInteraction() {
@@ -509,6 +523,7 @@ function damageVehicle(veh, amount) {
   ensureVehicleDamageState(veh);
   veh.health = Math.max(0, veh.health - amount);
   if (veh.smoke) veh.smoke.visible = veh.health < 45;
+  if (amount >= 10 && typeof triggerScreenFlash === 'function') triggerScreenFlash('impact');
 }
 
 function repairVehicleAtGarage(veh) {
@@ -529,7 +544,7 @@ function findNearestServiceLocation() {
   let nearest = null;
   let best = 7;
   for (const loc of cityLocations) {
-    if (loc.type !== 'garage' && loc.type !== 'gas' && loc.type !== 'shop') continue;
+    if (loc.type !== 'garage' && loc.type !== 'gas' && loc.type !== 'shop' && loc.type !== 'hospital') continue;
     const d = Math.hypot(loc.entrance.x - ref.x, loc.entrance.z - ref.z);
     if (d < best) {
       best = d;
@@ -555,6 +570,12 @@ function useServiceLocation(loc) {
   }
   if (loc.type === 'shop' && !inVehicle) {
     setHeldItem(player.heldType === 'gun' ? 'object' : 'gun');
+    return true;
+  }
+  if (loc.type === 'hospital' && !inVehicle) {
+    setWantedLevel(Math.max(0, wantedLevel - 2));
+    player.knockTimer = 0;
+    player.velocityY = 0;
     return true;
   }
   return false;
