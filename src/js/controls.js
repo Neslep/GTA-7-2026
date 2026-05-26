@@ -35,8 +35,23 @@ const mobileRunBtn = document.getElementById('mobileRunBtn');
 const mobileJumpBtn = document.getElementById('mobileJumpBtn');
 const mobileCarBtn = document.getElementById('mobileCarBtn');
 const mobileHitBtn = document.getElementById('mobileHitBtn');
+const qualityButtons = document.querySelectorAll('[data-quality]');
 
 if (hasTouchControls) document.body.classList.add('touch-ui');
+
+function syncGraphicsQualityButtons() {
+  for (const button of qualityButtons) {
+    button.classList.toggle('active', button.dataset.quality === graphicsQuality);
+  }
+}
+
+qualityButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    setGraphicsQuality(button.dataset.quality);
+    syncGraphicsQualityButtons();
+  });
+});
+syncGraphicsQualityButtons();
 
 function requestGamePointerLock() {
   if (hasTouchControls || !renderer.domElement.requestPointerLock) return;

@@ -21,7 +21,50 @@
   .intro-tag { font-family: 'IBM Plex Mono'; font-size: 12px; letter-spacing: 8px; color: #ff5900; opacity: 0.8; margin-bottom: 16px; }
   .intro-title { font-family: 'Bebas Neue'; font-size: clamp(80px, 14vw, 200px); line-height: 0.9; letter-spacing: 2px; color: #fff; text-shadow: 0 0 30px rgba(255, 89, 0, 0.4); }
   .intro-title span { color: #ff5900; }
-  .intro-sub { font-size: 13px; opacity: 0.6; letter-spacing: 3px; margin-top: 8px; margin-bottom: 48px; }
+  .intro-sub { font-size: 13px; opacity: 0.6; letter-spacing: 3px; margin-top: 8px; margin-bottom: 24px; }
+  .graphics-select {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+    padding: 8px 10px 8px 16px;
+    background: rgba(10, 10, 18, 0.54);
+    border: 1px solid rgba(0, 195, 255, 0.28);
+    backdrop-filter: blur(8px);
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  }
+  .graphics-select > span {
+    color: rgba(255,255,255,0.72);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+  }
+  .quality-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, 72px);
+    gap: 6px;
+  }
+  .quality-option {
+    height: 34px;
+    border: 1px solid rgba(255,255,255,0.16);
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.78);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  }
+  .quality-option:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 210, 0, 0.48);
+  }
+  .quality-option.active {
+    background: rgba(255, 210, 0, 0.95);
+    border-color: rgba(255, 210, 0, 1);
+    color: #0a0a12;
+  }
   #playBtn {
     background: #ffd200; color: #0a0a12; border: none; padding: 18px 56px;
     font-family: 'Bebas Neue'; font-size: 28px; letter-spacing: 4px; cursor: pointer;
@@ -47,6 +90,7 @@
   .topbar {
     position: absolute; top: 20px; left: 20px; right: 20px;
     display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 18px;
   }
   .logo {
     font-family: 'Bebas Neue'; font-size: 28px; letter-spacing: 3px;
@@ -62,6 +106,36 @@
   }
   .status-pill .dot { display: inline-block; width: 6px; height: 6px; background: #00ff88; border-radius: 50%; margin-right: 8px; animation: pulse 1.2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  #environmentPanel {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 192px;
+    padding: 8px 14px;
+    text-align: center;
+    background: rgba(10, 10, 18, 0.64);
+    border: 1px solid rgba(0, 195, 255, 0.36);
+    backdrop-filter: blur(8px);
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+    text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+  }
+  #envTime {
+    font-family: 'Bebas Neue';
+    font-size: 26px;
+    line-height: 0.95;
+    letter-spacing: 2px;
+    color: #ffd200;
+  }
+  .env-meta {
+    margin-top: 3px;
+    color: rgba(255,255,255,0.74);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
+    white-space: nowrap;
+  }
 
   #locationBadge {
     position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
@@ -307,7 +381,15 @@
 
   @media (pointer: coarse), (max-width: 820px) {
     .intro-tag { letter-spacing: 4px; text-align: center; }
-    .intro-sub { margin-bottom: 30px; text-align: center; padding: 0 18px; }
+    .intro-sub { margin-bottom: 18px; text-align: center; padding: 0 18px; }
+    .graphics-select {
+      gap: 10px;
+      margin-bottom: 20px;
+      padding: 7px 8px 7px 12px;
+    }
+    .graphics-select > span { font-size: 10px; letter-spacing: 2px; }
+    .quality-toggle { grid-template-columns: repeat(2, 60px); }
+    .quality-option { height: 32px; font-size: 10px; letter-spacing: 1.5px; }
     #playBtn { padding: 14px 38px; font-size: 24px; }
     .controls-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -327,6 +409,13 @@
     }
     .logo { font-size: 24px; letter-spacing: 2px; }
     .status-pill { padding: 7px 12px; font-size: 10px; letter-spacing: 1.5px; }
+    #environmentPanel {
+      top: 42px;
+      min-width: 168px;
+      padding: 6px 11px;
+    }
+    #envTime { font-size: 22px; letter-spacing: 1.5px; }
+    .env-meta { font-size: 8px; letter-spacing: 1.1px; }
     #locationBadge {
       top: calc(204px + env(safe-area-inset-top));
       max-width: 52vw;

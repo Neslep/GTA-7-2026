@@ -14,6 +14,13 @@
   <div class="intro-tag">NEON CITY JOYRIDE</div>
   <div class="intro-title">GTA 7<br><span>2026</span></div>
   <div class="intro-sub">— OPEN  WORLD  SANDBOX —</div>
+  <div class="graphics-select" aria-label="Graphics quality">
+    <span>GRAPHICS</span>
+    <div class="quality-toggle" role="group" aria-label="Graphics quality selector">
+      <button class="quality-option" type="button" data-quality="low">LOW</button>
+      <button class="quality-option" type="button" data-quality="high">HIGH</button>
+    </div>
+  </div>
   <button id="playBtn">▸ ENTER GAME</button>
   <div class="controls-grid">
     <div><kbd>WASD</kbd>Di chuyển</div>
@@ -35,6 +42,10 @@
   <div id="vignette"></div>
   <div class="topbar">
     <div class="logo">GTA<span>7 2026</span></div>
+    <div id="environmentPanel">
+      <div id="envTime">16:30</div>
+      <div class="env-meta"><span id="envPhase">SUNSET</span> / <span id="envWeather">CLEAR</span> / <span id="envQuality">HIGH</span></div>
+    </div>
     <div class="status-pill"><span class="dot"></span>LIVE · <span id="mode">ON FOOT</span></div>
   </div>
 
@@ -101,6 +112,7 @@
 <script src="src/js/world.js"></script>
 <script src="src/js/entities.js"></script>
 <script src="src/js/controls.js"></script>
+<script src="src/js/environment.js"></script>
 <script src="src/js/game-loop.js"></script>
 </body>
 </html>

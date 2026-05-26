@@ -625,6 +625,7 @@ function loop() {
   updateMission(dt);
   updatePoliceChase(dt);
   updateVehicleCollisions(dt);
+  updateEnvironment(dt);
   updateCamera(dt);
 
   // F press
