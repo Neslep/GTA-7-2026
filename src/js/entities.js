@@ -68,6 +68,116 @@ function makeCar(color = 0xff3030) {
   return { group: g, wheels, body, leftDoor, color };
 }
 
+function makePickup(color = 0x2080ff) {
+  const g = new Group();
+  const paint = new MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.45 });
+  const dark = new MeshStandardMaterial({ color: 0x181820, roughness: 0.5, metalness: 0.25 });
+  const body = new Mesh(new BoxGeometry(2.25, 0.82, 5.1), paint);
+  body.position.y = 0.78;
+  body.castShadow = true;
+  g.add(body);
+  const cabin = new Mesh(new BoxGeometry(2.0, 0.95, 1.85), dark);
+  cabin.position.set(0, 1.45, 0.95);
+  cabin.castShadow = true;
+  g.add(cabin);
+  const bed = new Mesh(new BoxGeometry(2.05, 0.42, 2.15), new MeshStandardMaterial({ color: 0x202028, roughness: 0.75, metalness: 0.15 }));
+  bed.position.set(0, 1.18, -1.35);
+  bed.castShadow = true;
+  g.add(bed);
+  const leftDoor = new Group();
+  leftDoor.position.set(-1.16, 0.98, 1.48);
+  const doorPanel = new Mesh(new BoxGeometry(0.08, 0.72, 1.05), paint);
+  doorPanel.position.set(0, 0, -0.46);
+  doorPanel.castShadow = true;
+  leftDoor.add(doorPanel);
+  g.add(leftDoor);
+
+  const wheelGeo = new CylinderGeometry(0.48, 0.48, 0.38, 14);
+  const wheelMat = new MeshStandardMaterial({ color: 0x101014, roughness: 0.9 });
+  const wheels = [];
+  for (const [x, z] of [[-1.18, 1.65], [1.18, 1.65], [-1.18, -1.65], [1.18, -1.65]]) {
+    const w = new Mesh(wheelGeo, wheelMat);
+    w.position.set(x, 0.47, z);
+    w.rotation.z = Math.PI / 2;
+    w.castShadow = true;
+    g.add(w);
+    wheels.push(w);
+  }
+  for (const x of [-0.68, 0.68]) {
+    const hl = new Mesh(new BoxGeometry(0.38, 0.18, 0.08), new MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xfff4d8, emissiveIntensity: 1.4 }));
+    hl.position.set(x, 0.92, 2.56);
+    g.add(hl);
+  }
+  return { group: g, wheels, body, leftDoor, color, kind: 'pickup' };
+}
+
+function makeTruck(color = 0xf0f0f0) {
+  const g = new Group();
+  const cabMat = new MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.35 });
+  const boxMat = new MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.62, metalness: 0.12 });
+  const body = new Mesh(new BoxGeometry(2.45, 0.9, 2.1), cabMat);
+  body.position.set(0, 0.95, 1.85);
+  body.castShadow = true;
+  g.add(body);
+  const cargo = new Mesh(new BoxGeometry(2.7, 1.75, 4.2), boxMat);
+  cargo.position.set(0, 1.45, -1.35);
+  cargo.castShadow = true;
+  cargo.receiveShadow = true;
+  g.add(cargo);
+  const windshield = new Mesh(new BoxGeometry(1.75, 0.42, 0.08), new MeshStandardMaterial({ color: 0x88c8ff, emissive: 0x88c8ff, emissiveIntensity: 0.18 }));
+  windshield.position.set(0, 1.54, 2.92);
+  windshield.rotation.x = -0.2;
+  g.add(windshield);
+  const leftDoor = new Group();
+  leftDoor.position.set(-1.26, 1.05, 2.26);
+  const doorPanel = new Mesh(new BoxGeometry(0.08, 0.9, 1.05), cabMat);
+  doorPanel.position.set(0, 0, -0.5);
+  doorPanel.castShadow = true;
+  leftDoor.add(doorPanel);
+  g.add(leftDoor);
+
+  const wheelGeo = new CylinderGeometry(0.55, 0.55, 0.42, 16);
+  const wheelMat = new MeshStandardMaterial({ color: 0x0e0e12, roughness: 0.92 });
+  const wheels = [];
+  for (const [x, z] of [[-1.32, 2.1], [1.32, 2.1], [-1.32, -0.65], [1.32, -0.65], [-1.32, -2.25], [1.32, -2.25]]) {
+    const w = new Mesh(wheelGeo, wheelMat);
+    w.position.set(x, 0.55, z);
+    w.rotation.z = Math.PI / 2;
+    w.castShadow = true;
+    g.add(w);
+    wheels.push(w);
+  }
+  return { group: g, wheels, body, leftDoor, color, kind: 'truck' };
+}
+
+function makePoliceVan() {
+  const van = makeTruck(0x102040);
+  van.kind = 'policeVan';
+  van.body.material.color.set(0x102040);
+  const sideMat = new MeshBasicMaterial({ color: 0x88c8ff });
+  for (const x of [-1.38, 1.38]) {
+    const panel = new Mesh(new BoxGeometry(0.04, 0.5, 1.8), sideMat);
+    panel.position.set(x, 1.75, -1.35);
+    van.group.add(panel);
+  }
+  const rearBars = new Group();
+  const barMat = new MeshStandardMaterial({ color: 0xb8c4d0, roughness: 0.3, metalness: 0.75 });
+  for (let i = 0; i < 5; i++) {
+    const bar = new Mesh(new CylinderGeometry(0.035, 0.035, 0.85, 6), barMat);
+    bar.position.set(-0.48 + i * 0.24, 1.45, -3.5);
+    rearBars.add(bar);
+  }
+  van.group.add(rearBars);
+  const red = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0xff2020 }));
+  red.position.set(-0.35, 2.45, 0.95);
+  const blue = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0x2080ff }));
+  blue.position.set(0.35, 2.45, 0.95);
+  van.group.add(red, blue);
+  van.sirenRed = red;
+  van.sirenBlue = blue;
+  return van;
+}
+
 function makeMotorbike(color = 0xff7030) {
   const g = new Group();
   const frameMat = new MeshStandardMaterial({ color: 0x15151c, roughness: 0.42, metalness: 0.65 });
@@ -133,10 +243,11 @@ function makeMotorbike(color = 0xff7030) {
 const vehicles = [];
 const carColors = [0xe83030, 0x2080ff, 0xffd200, 0x10b070, 0xff7030, 0xa040c0, 0xf0f0f0, 0x202028];
 const bikeColors = [0xff3030, 0xffd200, 0x2080ff, 0x10b070, 0xf0f0f0];
-const PARKED = 12;
+const PARKED = 18;
 for (let i = 0; i < PARKED; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
-  const car = makeCar(col);
+  const roll = Math.random();
+  const car = roll < 0.56 ? makeCar(col) : (roll < 0.84 ? makePickup(col) : makeTruck(col));
   // Try to place on a side street area
   let placed = false, tries = 0;
   while (!placed && tries < 50) {
@@ -163,7 +274,7 @@ for (let i = 0; i < PARKED; i++) {
     velocity: 0,
     angularVelocity: 0,
     isAI: false,
-    kind: 'car',
+    kind: car.kind || 'car',
     occupied: false,
   });
 }
@@ -202,10 +313,11 @@ for (let i = 0; i < PARKED_BIKES; i++) {
 
 // -------------------- AI TRAFFIC --------------------
 const aiCars = [];
-const TRAFFIC_COUNT = 14;
+const TRAFFIC_COUNT = 18;
 for (let i = 0; i < TRAFFIC_COUNT; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
-  const car = makeCar(col);
+  const roll = Math.random();
+  const car = roll < 0.6 ? makeCar(col) : (roll < 0.86 ? makePickup(col) : makeTruck(col));
   scene.add(car.group);
   // Pick a road lane to drive on
   const horizontal = Math.random() < 0.5;
@@ -221,7 +333,7 @@ for (let i = 0; i < TRAFFIC_COUNT; i++) {
     car.group.rotation.y = direction > 0 ? 0 : Math.PI;
   }
   aiCars.push({
-    ...car, horizontal, laneIndex, direction, speed: 8 + Math.random() * 8,
+    ...car, horizontal, laneIndex, direction, speed: (car.kind === 'truck' ? 5 : 8) + Math.random() * (car.kind === 'truck' ? 5 : 8),
     laneOff
   });
 }

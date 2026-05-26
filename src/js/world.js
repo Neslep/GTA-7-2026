@@ -514,6 +514,39 @@ function makeLocationInterior(loc, index) {
     loc.alarmLight = makeNeonLight(x, 4, z - 4, 0xff3030, 0, 24);
     loc.effectLights = [makeNeonLight(x, 4, z - 5, 0xffd200, 1.4, 18)];
     for (let i = 0; i < 3; i++) makeSceneActor(x - 5 + i * 5, z + 2, 0x1f5fff, 'guard');
+  } else if (loc.type === 'police') {
+    const desk = new Mesh(new BoxGeometry(11, 1.2, 2), new MeshStandardMaterial({ color: 0x1d2d46, roughness: 0.55, metalness: 0.18 }));
+    desk.position.set(x, 0.6, z + 4.5);
+    scene.add(desk);
+    makeNeonLight(x, 3.2, z + 1, loc.lightColor, 1.6, 20);
+    for (let i = 0; i < 2; i++) makeSceneActor(x - 3 + i * 6, z + 2.6, 0x1f5fff, 'guard');
+
+    const barMat = new MeshStandardMaterial({ color: 0x9aa4b2, roughness: 0.34, metalness: 0.75 });
+    const cellWallMat = new MeshStandardMaterial({ color: 0x334154, roughness: 0.68 });
+    const cellBack = new Mesh(new BoxGeometry(12, 3.0, 0.22), cellWallMat);
+    cellBack.position.set(x - 3.6, 1.5, z - 11.2);
+    scene.add(cellBack);
+    for (const cx of [x - 9.6, x + 2.4]) {
+      const side = new Mesh(new BoxGeometry(0.22, 3.0, 6.6), cellWallMat);
+      side.position.set(cx, 1.5, z - 7.9);
+      scene.add(side);
+    }
+    const topRail = new Mesh(new BoxGeometry(11.6, 0.14, 0.16), barMat);
+    topRail.position.set(x - 3.6, 3.05, z - 4.65);
+    const bottomRail = new Mesh(new BoxGeometry(11.6, 0.14, 0.16), barMat);
+    bottomRail.position.set(x - 3.6, 0.35, z - 4.65);
+    scene.add(topRail, bottomRail);
+    for (let i = 0; i < 9; i++) {
+      const bar = new Mesh(new CylinderGeometry(0.045, 0.045, 2.7, 8), barMat);
+      bar.position.set(x - 8.2 + i * 1.15, 1.7, z - 4.65);
+      scene.add(bar);
+    }
+    const bunk = new Mesh(new BoxGeometry(3.2, 0.35, 1.5), new MeshStandardMaterial({ color: 0x303844, roughness: 0.65 }));
+    bunk.position.set(x - 1.4, 0.55, z - 9.6);
+    scene.add(bunk);
+    loc.jailCellPos = new Vector3(x - 5.2, 0, z - 8.2);
+    loc.jailCameraPos = new Vector3(x + 3.6, 3.0, z - 1.4);
+    loc.releasePos = new Vector3(x, 0, z + 8);
   } else {
     const service = new Mesh(new BoxGeometry(10, 1.2, 2.2), new MeshStandardMaterial({ color: loc.color, roughness: 0.55 }));
     service.position.set(x, 0.6, z - 5);

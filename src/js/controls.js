@@ -203,6 +203,9 @@ let policeCars = [];
 let distanceTraveled = 0;
 let lastPos = new Vector3();
 let hijackState = null;
+let arrestState = null;
+let jailTimer = 0;
+let cuffVisual = null;
 const activeProjectiles = [];
 const activeEffects = [];
 
@@ -332,6 +335,7 @@ function startEscapeHeatMission() {
 
 function updateMission(dt) {
   if (!activeMission) return;
+  if (activeMission.id === 'jail' || activeMission.id === 'arrested') return;
 
   if (activeMission.status !== 'active') {
     missionStatusTimer -= dt;
@@ -372,6 +376,13 @@ function setWantedLevel(level) {
   } else if (!inVehicle && !activeLocation) {
     document.getElementById('mode').textContent = 'ON FOOT';
   }
+}
+
+function reportCrime(level = 1, reason = 'WANTED') {
+  if (jailTimer > 0 || arrestState) return;
+  setWantedLevel(Math.max(wantedLevel + level, level));
+  const modeEl = document.getElementById('mode');
+  if (modeEl && !inVehicle) modeEl.textContent = reason;
 }
 
 function enterLocation(loc) {
@@ -551,43 +562,347 @@ function useServiceLocation(loc) {
 
 function spawnPoliceCar() {
   if (policeCars.length >= Math.min(3, Math.max(1, wantedLevel))) return;
-  const car = makeCar(0x102040);
+  const car = wantedLevel >= 2 && Math.random() < 0.55 ? makePoliceVan() : makeCar(0x102040);
   const ref = getPlayerRefPosition();
   const angle = Math.random() * Math.PI * 2;
   car.group.position.set(ref.x + Math.sin(angle) * 38, 0, ref.z + Math.cos(angle) * 38);
   car.group.rotation.y = angle + Math.PI;
-  const red = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0xff2020 }));
-  red.position.set(-0.35, 1.85, 0.1);
-  const blue = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0x2080ff }));
-  blue.position.set(0.35, 1.85, 0.1);
-  car.group.add(red, blue);
+  let red = car.sirenRed;
+  let blue = car.sirenBlue;
+  if (!red || !blue) {
+    red = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0xff2020 }));
+    red.position.set(-0.35, 1.85, 0.1);
+    blue = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0x2080ff }));
+    blue.position.set(0.35, 1.85, 0.1);
+    car.group.add(red, blue);
+  }
   scene.add(car.group);
   policeCars.push({
     ...car,
-    kind: 'police',
+    kind: car.kind || 'police',
+    policeRole: car.kind === 'policeVan' ? 'transport' : 'patrol',
     velocity: 0,
-    health: 140,
+    health: car.kind === 'policeVan' ? 190 : 140,
     sirenRed: red,
     sirenBlue: blue,
     bumpTimer: 0,
   });
 }
 
+function ensurePoliceTransport(policeCar) {
+  if (policeCar.kind === 'policeVan') return policeCar;
+  const van = makePoliceVan();
+  van.group.position.copy(policeCar.group.position);
+  van.group.rotation.y = policeCar.group.rotation.y;
+  van.velocity = 0;
+  van.health = 190;
+  van.policeRole = 'transport';
+  scene.add(van.group);
+  policeCars.push({
+    ...van,
+    kind: 'policeVan',
+    policeRole: 'transport',
+    velocity: 0,
+    health: 190,
+    sirenRed: van.sirenRed,
+    sirenBlue: van.sirenBlue,
+    bumpTimer: 0,
+  });
+  return policeCars[policeCars.length - 1];
+}
+
+function ensureCuffVisual() {
+  if (cuffVisual) return cuffVisual;
+  cuffVisual = new Group();
+  const metal = new MeshStandardMaterial({ color: 0xc8d0d8, roughness: 0.25, metalness: 0.85 });
+  for (const x of [-0.22, 0.22]) {
+    const cuff = new Mesh(new CylinderGeometry(0.13, 0.13, 0.08, 14), metal);
+    cuff.position.set(x, 1.02, -0.28);
+    cuff.rotation.z = Math.PI / 2;
+    cuffVisual.add(cuff);
+  }
+  const chain = new Mesh(new BoxGeometry(0.28, 0.04, 0.04), metal);
+  chain.position.set(0, 1.02, -0.28);
+  cuffVisual.add(chain);
+  cuffVisual.visible = false;
+  player.group.add(cuffVisual);
+  return cuffVisual;
+}
+
+function setPlayerCuffed(cuffed) {
+  const cuffs = ensureCuffVisual();
+  cuffs.visible = cuffed;
+  if (!cuffed) return;
+  player.leftArm.rotation.set(0.85, 0, -0.55);
+  player.rightArm.rotation.set(0.85, 0, 0.55);
+  player.heldItem.visible = false;
+}
+
+function makePoliceOfficerActor() {
+  const officer = makePed();
+  const uniform = new MeshStandardMaterial({ color: 0x16345c, roughness: 0.55 });
+  const dark = new MeshStandardMaterial({ color: 0x101018, roughness: 0.65 });
+  officer.body.material = uniform;
+  officer.leftArm.material = uniform;
+  officer.rightArm.material = uniform;
+  officer.leftLeg.material = dark;
+  officer.rightLeg.material = dark;
+  const cap = new Mesh(new BoxGeometry(0.42, 0.12, 0.38), new MeshStandardMaterial({ color: 0x102040, roughness: 0.5 }));
+  cap.position.y = 1.9;
+  const badge = new Mesh(new BoxGeometry(0.08, 0.1, 0.03), new MeshBasicMaterial({ color: 0xffd200 }));
+  badge.position.set(0.16, 1.22, 0.18);
+  officer.group.add(cap, badge);
+  officer.group.visible = true;
+  return {
+    ...officer,
+    walkPhase: 0,
+    startPos: new Vector3(),
+  };
+}
+
+function setOfficerPose(officer, moving, dt) {
+  if (!officer) return;
+  officer.walkPhase += dt * (moving ? 8 : 2);
+  const swing = moving ? Math.sin(officer.walkPhase) : 0;
+  officer.leftLeg.rotation.x = swing * 0.42;
+  officer.rightLeg.rotation.x = -swing * 0.42;
+  officer.leftArm.rotation.x = -swing * 0.3;
+  officer.rightArm.rotation.x = swing * 0.3;
+  officer.body.position.y = 1.1 + Math.abs(swing) * 0.025;
+}
+
+function beginArrest(policeCar) {
+  if (arrestState || jailTimer > 0) return;
+  const station = getLocationById('police');
+  if (!station) return;
+  policeCar = ensurePoliceTransport(policeCar);
+  if (inVehicle) {
+    inVehicle.occupied = false;
+    inVehicle.group.rotation.z = 0;
+    document.getElementById('speedo').classList.remove('show');
+    inVehicle = null;
+  }
+  activeLocation = null;
+  player.group.visible = true;
+  player.heldItem.visible = false;
+  player.velocityY = 0;
+  player.knockTimer = 0;
+  keys['KeyW'] = keys['KeyA'] = keys['KeyS'] = keys['KeyD'] = keys['Space'] = false;
+  policeCar.arresting = true;
+  policeCar.policeRole = 'transport';
+  policeCar.velocity = 0;
+  const officer = makePoliceOfficerActor();
+  const officerStartX = policeCar.group.position.x - Math.sin(policeCar.group.rotation.y) * 3.2;
+  const officerStartZ = policeCar.group.position.z - Math.cos(policeCar.group.rotation.y) * 3.2;
+  officer.group.position.set(officerStartX, 0, officerStartZ);
+  officer.group.rotation.y = policeCar.group.rotation.y;
+  officer.startPos.copy(officer.group.position);
+  scene.add(officer.group);
+  arrestState = {
+    car: policeCar,
+    station,
+    officer,
+    phase: 'cuff',
+    timer: 0,
+  };
+  setPlayerCuffed(true);
+  activeMission = {
+    id: 'arrested',
+    name: 'Arrested',
+    status: 'active',
+    statusText: 'Police are taking you to the station.',
+  };
+  missionTimer = 999;
+  missionTarget = station;
+  document.getElementById('mode').textContent = 'ARRESTED';
+}
+
+function updateArrest(dt) {
+  if (!arrestState) return;
+  const a = arrestState;
+  a.timer += dt;
+
+  const sideX = a.car.group.position.x - Math.cos(a.car.group.rotation.y) * 1.95;
+  const sideZ = a.car.group.position.z - Math.sin(a.car.group.rotation.y) * 1.95;
+  if (a.phase === 'cuff') {
+    const t = Math.min(1, a.timer / 1.15);
+    player.group.visible = true;
+    player.group.position.set(sideX, 0, sideZ);
+    player.yaw = a.car.group.rotation.y + Math.PI;
+    player.group.rotation.y = player.yaw;
+    player.body.rotation.x = 0.18;
+    player.head.rotation.x = 0.1;
+    setPlayerCuffed(true);
+    if (a.officer) {
+      const officerX = a.officer.startPos.x + (sideX - a.officer.startPos.x) * t;
+      const officerZ = a.officer.startPos.z + (sideZ - 0.75 - a.officer.startPos.z) * t;
+      a.officer.group.position.set(officerX, 0, officerZ);
+      a.officer.group.rotation.y = Math.atan2(sideX - officerX, sideZ - officerZ);
+      if (t > 0.82) {
+        a.officer.leftArm.rotation.x = -1.05;
+        a.officer.rightArm.rotation.x = -1.05;
+      } else {
+        setOfficerPose(a.officer, true, dt);
+      }
+    }
+    if (a.timer > 1.8) {
+      a.phase = 'load';
+      a.timer = 0;
+      if (a.officer) a.officer.startPos.copy(a.officer.group.position);
+    }
+    return;
+  }
+
+  if (a.phase === 'load') {
+    const rearX = a.car.group.position.x - Math.sin(a.car.group.rotation.y) * 2.7;
+    const rearZ = a.car.group.position.z - Math.cos(a.car.group.rotation.y) * 2.7;
+    const t = Math.min(1, a.timer / 1.4);
+    player.group.visible = true;
+    player.group.position.set(sideX + (rearX - sideX) * t, 0, sideZ + (rearZ - sideZ) * t);
+    player.yaw = a.car.group.rotation.y;
+    player.group.rotation.y = player.yaw;
+    player.body.rotation.x = 0.28;
+    player.head.rotation.x = 0.12;
+    setPlayerCuffed(true);
+    if (a.officer) {
+      a.officer.group.position.set(player.group.position.x - Math.cos(a.car.group.rotation.y) * 0.65, 0, player.group.position.z - Math.sin(a.car.group.rotation.y) * 0.65);
+      a.officer.group.rotation.y = a.car.group.rotation.y;
+      a.officer.leftArm.rotation.x = -0.95;
+      a.officer.rightArm.rotation.x = -0.75;
+      setOfficerPose(a.officer, t < 0.95, dt);
+    }
+    if (a.timer > 1.4) {
+      a.phase = 'drive';
+      a.timer = 0;
+      player.group.visible = false;
+      if (a.officer) a.officer.group.visible = false;
+    }
+    return;
+  }
+
+  const target = a.station.entrance;
+  const dx = target.x - a.car.group.position.x;
+  const dz = target.z - a.car.group.position.z;
+  const dist = Math.max(0.001, Math.hypot(dx, dz));
+  const desiredYaw = Math.atan2(dx, dz);
+  let diff = desiredYaw - a.car.group.rotation.y;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  a.car.group.rotation.y += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
+  const transportSpeed = a.car.kind === 'policeVan' ? 18 : 20;
+  a.car.velocity += (transportSpeed - a.car.velocity) * dt * 1.2;
+  const dirX = Math.sin(a.car.group.rotation.y);
+  const dirZ = Math.cos(a.car.group.rotation.y);
+  a.car.group.position.x += dirX * a.car.velocity * dt;
+  a.car.group.position.z += dirZ * a.car.velocity * dt;
+  for (const w of a.car.wheels) w.rotation.x += a.car.velocity * dt * 1.8;
+
+  if (dist < 5 || a.timer > 18) {
+    enterJailCell(a.station);
+  }
+}
+
+function enterJailCell(station) {
+  const cell = station.jailCellPos || station.insidePos;
+  if (arrestState && arrestState.officer) scene.remove(arrestState.officer.group);
+  arrestState = null;
+  setWantedLevel(0);
+  bankAlarm = false;
+  activeMission = {
+    id: 'jail',
+    name: 'Jail',
+    status: 'active',
+    statusText: 'Wait 60s until release.',
+  };
+  missionTarget = null;
+  missionTimer = 60;
+  missionReward = 0;
+  jailTimer = 60;
+  activeLocation = station;
+  locationReturnPos.copy(station.entrance);
+  player.group.visible = true;
+  player.heldItem.visible = true;
+  setHeldItem('empty');
+  setPlayerCuffed(false);
+  player.body.rotation.x = 0;
+  player.head.rotation.x = 0;
+  player.leftArm.rotation.set(0, 0, 0);
+  player.rightArm.rotation.set(0, 0, 0);
+  player.group.position.set(cell.x, 0, cell.z);
+  player.yaw = Math.PI;
+  player.group.rotation.y = player.yaw;
+  player.group.rotation.z = 0;
+  camYaw.v = Math.PI;
+  camPitch.v = 0.08;
+  document.getElementById('mode').textContent = 'JAILED';
+}
+
+function updateJail(dt) {
+  if (jailTimer <= 0) return;
+  jailTimer = Math.max(0, jailTimer - dt);
+  if (activeMission && activeMission.id === 'jail') {
+    activeMission.statusText = `Release in ${Math.ceil(jailTimer)}s.`;
+    missionTimer = jailTimer;
+  }
+  const station = getLocationById('police');
+  if (station && station.jailCellPos) {
+    const cell = station.jailCellPos;
+    const dx = player.group.position.x - cell.x;
+    const dz = player.group.position.z - cell.z;
+    if (Math.hypot(dx, dz) > 4) player.group.position.set(cell.x, 0, cell.z);
+  }
+  if (jailTimer <= 0 && station) {
+    const out = station.releasePos || station.exitPos || station.entrance;
+    player.group.position.set(out.x, 0, out.z);
+    activeLocation = null;
+    activeMission = null;
+    document.getElementById('mode').textContent = 'RELEASED';
+  }
+}
+
 function updatePoliceChase(dt) {
+  if (arrestState || jailTimer > 0) return;
   if (wantedLevel <= 0) return;
   while (policeCars.length < Math.min(3, wantedLevel)) spawnPoliceCar();
   const target = getPlayerRefObject();
+  const targetSpeed = inVehicle ? Math.abs(inVehicle.velocity || 0) : ((keys['ShiftLeft'] || keys['ShiftRight']) ? 8.5 : 4.2);
 
   for (const car of policeCars) {
-    const dx = target.position.x - car.group.position.x;
-    const dz = target.position.z - car.group.position.z;
+    let dx = target.position.x - car.group.position.x;
+    let dz = target.position.z - car.group.position.z;
     const dist = Math.max(0.001, Math.hypot(dx, dz));
+    if (dist > 115) {
+      const rearYaw = inVehicle ? inVehicle.group.rotation.y + Math.PI : player.yaw + Math.PI;
+      car.group.position.set(
+        target.position.x + Math.sin(rearYaw) * 34 + (Math.random() - 0.5) * 8,
+        0,
+        target.position.z + Math.cos(rearYaw) * 34 + (Math.random() - 0.5) * 8
+      );
+      car.group.rotation.y = rearYaw + Math.PI;
+      car.velocity = Math.max(car.velocity, 16);
+    }
+
+    const lead = MathUtils.clamp(dist / 38, 0.25, 2.2);
+    let leadX = target.position.x;
+    let leadZ = target.position.z;
+    if (inVehicle) {
+      leadX += Math.sin(inVehicle.group.rotation.y) * targetSpeed * lead;
+      leadZ += Math.cos(inVehicle.group.rotation.y) * targetSpeed * lead;
+    } else {
+      leadX += Math.sin(player.yaw) * targetSpeed * lead * 0.45;
+      leadZ += Math.cos(player.yaw) * targetSpeed * lead * 0.45;
+    }
+    dx = leadX - car.group.position.x;
+    dz = leadZ - car.group.position.z;
     const desiredYaw = Math.atan2(dx, dz);
     let diff = desiredYaw - car.group.rotation.y;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
-    car.group.rotation.y += Math.max(-1.9 * dt, Math.min(1.9 * dt, diff));
-    car.velocity += (wantedLevel * 4 + 12 - car.velocity) * dt * 0.85;
+    const turn = car.kind === 'policeVan' ? 1.9 : 2.55;
+    car.group.rotation.y += Math.max(-turn * dt, Math.min(turn * dt, diff));
+    const escapeBoost = inVehicle ? Math.min(14, targetSpeed * 0.45) : Math.min(5, targetSpeed * 0.35);
+    const chaseTopSpeed = (car.kind === 'policeVan' ? wantedLevel * 3 + 15 : wantedLevel * 4 + 17) + escapeBoost;
+    car.velocity += (chaseTopSpeed - car.velocity) * dt * (dist > 45 ? 1.45 : 0.92);
     const dirX = Math.sin(car.group.rotation.y);
     const dirZ = Math.cos(car.group.rotation.y);
     let nx = car.group.position.x + dirX * car.velocity * dt;
@@ -603,8 +918,15 @@ function updatePoliceChase(dt) {
     car.bumpTimer = Math.max(0, car.bumpTimer - dt);
     if (dist < 3.1 && car.bumpTimer <= 0) {
       car.bumpTimer = 0.8;
-      if (inVehicle) damageVehicle(inVehicle, 14 + wantedLevel * 4);
+      if (inVehicle) {
+        damageVehicle(inVehicle, 14 + wantedLevel * 4);
+        if (wantedLevel >= 3 && inVehicle.health <= 20) beginArrest(car);
+      }
+      else if (wantedLevel >= 2) beginArrest(car);
       else triggerLocationAlert('WANTED');
+    }
+    if (!inVehicle && wantedLevel >= 3 && dist < 2.2) {
+      beginArrest(car);
     }
   }
 }
@@ -647,16 +969,39 @@ function applyHitToNearestTarget(range, arc, damage, knock) {
     targetType = 'actor';
   }
 
+  for (const vehicle of [...vehicles, ...aiCars, ...policeCars]) {
+    if (!vehicle || vehicle === inVehicle) continue;
+    const dx = vehicle.group.position.x - px;
+    const dz = vehicle.group.position.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist > best || dist < 0.001) continue;
+    const dot = (dx / dist) * forward.x + (dz / dist) * forward.z;
+    if (dot < arc) continue;
+    best = dist;
+    target = vehicle;
+    targetType = 'vehicle';
+  }
+
   if (!target) return false;
   const dx = target.group.position.x - px;
   const dz = target.group.position.z - pz;
   const dist = Math.max(0.001, Math.hypot(dx, dz));
   if (targetType === 'ped') {
     damagePed(target, damage, dx / dist * knock, dz / dist * knock);
+    reportCrime(player.heldType === 'gun' ? 2 : 1, 'ASSAULT');
   } else {
+    if (targetType === 'vehicle') {
+      damageVehicle(target, damage * 0.75);
+      target.group.position.x += dx / dist * knock * 0.45;
+      target.group.position.z += dz / dist * knock * 0.45;
+      spawnSparkBurst(target.group.position.x, 0.8, target.group.position.z, player.heldType === 'gun' ? 1.25 : 0.8);
+      reportCrime(player.heldType === 'gun' ? 2 : 1, 'VEHICLE ATTACK');
+      return true;
+    }
     target.group.position.x += dx / dist * knock;
     target.group.position.z += dz / dist * knock;
     target.hitTimer = 0.28;
+    reportCrime(player.heldType === 'gun' ? 2 : 1, 'ASSAULT');
   }
   if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
   return true;
@@ -683,6 +1028,19 @@ function damageTargetsNearPoint(x, z, radius, damage, knock) {
     actor.hitTimer = 0.28;
     hit = true;
   }
+  for (const vehicle of [...vehicles, ...aiCars, ...policeCars]) {
+    if (!vehicle || vehicle === inVehicle) continue;
+    const dx = vehicle.group.position.x - x;
+    const dz = vehicle.group.position.z - z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > radius + 1.2 || dist < 0.001) continue;
+    damageVehicle(vehicle, damage * 0.9);
+    vehicle.group.position.x += dx / dist * knock * 0.55;
+    vehicle.group.position.z += dz / dist * knock * 0.55;
+    spawnSparkBurst(vehicle.group.position.x, 0.8, vehicle.group.position.z, 1.1);
+    hit = true;
+  }
+  if (hit) reportCrime(1, 'ATTACK');
   if (hit && isNearSensitiveLocation(x, z)) triggerLocationAlert('WANTED');
   return hit;
 }
@@ -785,8 +1143,8 @@ function performPlayerAttack() {
   player.actionTimer = 0.28;
   if (player.heldType === 'gun') {
     spawnMuzzleFlash();
-    applyHitToNearestTarget(13, 0.72, 44, 1.25);
-    if (isNearSensitiveLocation(player.group.position.x, player.group.position.z)) triggerLocationAlert('WANTED');
+    const hit = applyHitToNearestTarget(16, 0.72, 44, 1.25);
+    if (!hit) reportCrime(2, 'SHOTS FIRED');
   } else if (player.heldType === 'object') {
     throwHeldObject();
     applyHitToNearestTarget(4.8, 0.58, 26, 0.75);
@@ -1061,10 +1419,13 @@ function updateVehicle(dt, veh) {
   const throttle = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
   const isBike = veh.kind === 'bike';
+  const isHeavy = veh.kind === 'truck' || veh.kind === 'policeVan';
+  const isPickup = veh.kind === 'pickup';
   const damageLimit = Math.max(0.45, veh.health / 100);
-  const maxSpeed = (isBike ? (sprint ? 46 : 28) : (sprint ? 38 : 22)) * damageLimit;
-  const accel = isBike ? 18 : 14;
-  const decel = isBike ? 7.5 : 6;
+  const maxBase = isBike ? (sprint ? 46 : 28) : (isHeavy ? (sprint ? 28 : 18) : (isPickup ? (sprint ? 34 : 22) : (sprint ? 38 : 22)));
+  const maxSpeed = maxBase * damageLimit;
+  const accel = isBike ? 18 : (isHeavy ? 9 : 14);
+  const decel = isBike ? 7.5 : (isHeavy ? 4.5 : 6);
   if (throttle > 0) veh.velocity += accel * dt;
   else if (throttle < 0) veh.velocity -= accel * 0.7 * dt;
   else {
@@ -1081,7 +1442,7 @@ function updateVehicle(dt, veh) {
 
   // Steering: A=left, D=right
   const steer = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
-  const turnRate = isBike ? 2.8 : 1.8;
+  const turnRate = isBike ? 2.8 : (isHeavy ? 1.25 : 1.8);
   // turning effectiveness depends on speed
   const speedFactor = Math.min(1, Math.abs(veh.velocity) / (isBike ? 4 : 6));
   veh.group.rotation.y += steer * turnRate * dt * speedFactor;

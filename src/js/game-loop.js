@@ -178,7 +178,27 @@ function updateLocationEffects(dt) {
 
 function updateCamera(dt) {
   let targetX, targetY, targetZ, lookX, lookY, lookZ;
-  if (inVehicle) {
+  if (jailTimer > 0 && activeLocation && activeLocation.type === 'police') {
+    const cell = activeLocation.jailCellPos || player.group.position;
+    const camPos = activeLocation.jailCameraPos || new Vector3(cell.x + 5.5, 3.1, cell.z + 5.5);
+    targetX = camPos.x;
+    targetY = camPos.y;
+    targetZ = camPos.z;
+    lookX = player.group.position.x;
+    lookY = player.group.position.y + 1.25;
+    lookZ = player.group.position.z;
+  } else if (arrestState) {
+    const v = arrestState.car;
+    const dist = v.kind === 'policeVan' ? 12 : 9;
+    const height = v.kind === 'policeVan' ? 5.2 : 4.5;
+    const camDirY = v.group.rotation.y + camYaw.v;
+    targetX = v.group.position.x - Math.sin(camDirY) * dist;
+    targetZ = v.group.position.z - Math.cos(camDirY) * dist;
+    targetY = v.group.position.y + height + camPitch.v * 4;
+    lookX = v.group.position.x;
+    lookY = v.group.position.y + 1.8;
+    lookZ = v.group.position.z;
+  } else if (inVehicle) {
     const v = inVehicle;
     // Camera follow vehicle
     const dist = v.kind === 'bike' ? 7 : 9;
@@ -210,6 +230,7 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
+  if (jailTimer > 0 || arrestState) return;
   if (hijackState) return;
   if (nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
@@ -327,7 +348,7 @@ function startHijackTrafficVehicle(car) {
     t: 0,
     duration: 1.25,
   };
-  setWantedLevel(Math.max(wantedLevel, 1));
+  reportCrime(2, 'CAR THEFT');
   player.heldItem.visible = true;
   document.getElementById('mode').textContent = 'HIJACKING';
 }
@@ -376,6 +397,8 @@ function updateHijackSequence(dt) {
 
 function getVehicleCollisionRadius(vehicle) {
   if (vehicle.kind === 'bike') return 1.15;
+  if (vehicle.kind === 'truck' || vehicle.kind === 'policeVan') return 2.65;
+  if (vehicle.kind === 'pickup') return 2.05;
   if (vehicle.kind === 'police') return 1.85;
   return 1.75;
 }
@@ -507,11 +530,15 @@ function drawMinimap() {
   for (const v of vehicles) {
     if (v === inVehicle) continue;
     const [x, y] = w2m(v.group.position.x, v.group.position.z);
-    mmCtx.fillStyle = v.kind === 'bike' ? '#ffd200' : '#88c8ff';
+    mmCtx.fillStyle = v.kind === 'bike' ? '#ffd200' : (v.kind === 'truck' || v.kind === 'policeVan' ? '#d8d8d8' : '#88c8ff');
     if (v.kind === 'bike') {
       mmCtx.beginPath();
       mmCtx.arc(x, y, 2.5, 0, Math.PI * 2);
       mmCtx.fill();
+    } else if (v.kind === 'truck' || v.kind === 'policeVan') {
+      mmCtx.fillRect(x-3, y-3, 6, 6);
+    } else if (v.kind === 'pickup') {
+      mmCtx.fillRect(x-2.5, y-2.5, 5, 5);
     } else {
       mmCtx.fillRect(x-2, y-2, 4, 4);
     }
@@ -597,7 +624,14 @@ function loop() {
   const dt = Math.min(0.05, clock.getDelta());
   frame++;
 
-  if (hijackState) {
+  if (arrestState) {
+    updateArrest(dt);
+    nearestVehicle = null;
+    nearestTrafficVehicle = null;
+    nearestLocation = null;
+    nearestMissionStart = null;
+    nearestServiceLocation = null;
+  } else if (hijackState) {
     updateHijackSequence(dt);
     nearestVehicle = null;
     nearestTrafficVehicle = null;
@@ -619,6 +653,7 @@ function loop() {
   updateAITraffic(dt);
   updatePeds(dt);
   updateCombatEffects(dt);
+  updateJail(dt);
   updateCitySceneActors(dt);
   updateLocationAlert(dt);
   updateLocationEffects(dt);
@@ -641,8 +676,9 @@ function loop() {
   if (frame % 2 === 0) drawMinimap();
   if (inVehicle) {
     kmhEl.textContent = Math.round(Math.abs(inVehicle.velocity) * 3.6);
-    gearEl.textContent = inVehicle.velocity < -0.5 ? 'R' : 'D';
+    gearEl.textContent = inVehicle.kind === 'truck' || inVehicle.kind === 'policeVan' ? (inVehicle.velocity < -0.5 ? 'TRK-R' : 'TRK') : (inVehicle.velocity < -0.5 ? 'R' : 'D');
   }
+  document.body.classList.toggle('aiming-gun', !inVehicle && !arrestState && jailTimer <= 0 && player.heldType === 'gun');
   distEl.textContent = Math.floor(distanceTraveled);
   if (locationBadgeEl) {
     const locLabel = activeLocation ? activeLocation.label : (nearestLocation ? nearestLocation.label : '');
@@ -669,7 +705,15 @@ function loop() {
 
   // Prompt
   promptEl.classList.toggle('vehicle-mode', !!inVehicle || !!activeLocation);
-  if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') {
+  if (jailTimer > 0) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = `JAILED · ${Math.ceil(jailTimer)}s`;
+  }
+  else if (arrestState) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = 'POLICE TRANSPORT';
+  }
+  else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>REPAIR / REPAINT';
   }
