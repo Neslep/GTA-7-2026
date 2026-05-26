@@ -566,6 +566,44 @@ function makeLocationInterior(loc, index) {
     loc.jailCellPos = new Vector3(x - 5.2, 0, z - 8.2);
     loc.jailCameraPos = new Vector3(x + 3.6, 3.0, z - 1.4);
     loc.releasePos = new Vector3(x, 0, z + 8);
+  } else if (loc.type === 'casino') {
+    const table = new Mesh(
+      new CylinderGeometry(5.2, 5.2, 0.35, 32),
+      new MeshStandardMaterial({ color: 0x07503a, roughness: 0.48, metalness: 0.08, emissive: 0x022018, emissiveIntensity: 0.35 })
+    );
+    table.scale.z = 0.62;
+    table.position.set(x, 0.42, z - 2.5);
+    scene.add(table);
+    loc.blackjackPos = new Vector3(x, 0, z - 2.5);
+
+    const rail = new Mesh(
+      new THREE.TorusGeometry(5.25, 0.12, 8, 36),
+      new MeshStandardMaterial({ color: 0xffd200, roughness: 0.35, metalness: 0.35, emissive: 0x403000, emissiveIntensity: 0.5 })
+    );
+    rail.rotation.x = Math.PI / 2;
+    rail.scale.y = 0.62;
+    rail.position.set(x, 0.64, z - 2.5);
+    scene.add(rail);
+
+    const tableSign = makeSign('BLACKJACK', '#ffd200', '#ff00cc', 7, 1.5);
+    tableSign.position.set(x, 2.4, z - 8.2);
+    scene.add(tableSign);
+
+    const chipColors = [0xff3030, 0x00c3ff, 0xffd200, 0xffffff];
+    for (let i = 0; i < 8; i++) {
+      const chip = new Mesh(
+        new CylinderGeometry(0.28, 0.28, 0.08, 16),
+        new MeshStandardMaterial({ color: chipColors[i % chipColors.length], emissive: chipColors[i % chipColors.length], emissiveIntensity: 0.18 })
+      );
+      chip.position.set(x - 2.6 + (i % 4) * 0.55, 0.72 + Math.floor(i / 4) * 0.09, z - 2.6);
+      scene.add(chip);
+    }
+
+    const dealer = makeSceneActor(x, z - 6.5, 0xffd200, 'idle');
+    dealer.rotation.y = 0;
+    makeNeonLight(x - 7, 3.2, z - 3.5, 0xff00cc, 1.7, 18);
+    makeNeonLight(x + 7, 3.2, z - 3.5, 0x00c3ff, 1.7, 18);
+    for (let i = 0; i < 4; i++) makeSceneActor(x - 6 + i * 4, z + 2, i % 2 ? 0x00c3ff : 0xff5900, 'idle');
   } else {
     const service = new Mesh(new BoxGeometry(10, 1.2, 2.2), new MeshStandardMaterial({ color: loc.color, roughness: 0.55 }));
     service.position.set(x, 0.6, z - 5);

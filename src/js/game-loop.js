@@ -348,12 +348,14 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
-  if (jailTimer > 0 || arrestState) return;
+  if (jailTimer > 0 || arrestState || blackjackActive) return;
   if (hijackState) return;
   if (nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
     startMission(nearestMissionStart);
+  } else if (canPlayBlackjack()) {
+    openBlackjack();
   } else if (activeLocation) {
     exitLocation();
   } else if (!inVehicle && nearestLocation) {
@@ -790,6 +792,14 @@ function loop() {
     nearestLocation = null;
     nearestMissionStart = null;
     nearestServiceLocation = null;
+  } else if (blackjackActive) {
+    nearestVehicle = null;
+    nearestTrafficVehicle = null;
+    nearestLocation = null;
+    nearestMissionStart = null;
+    nearestServiceLocation = null;
+    mouse.dx = 0;
+    mouse.dy = 0;
   } else if (hijackState) {
     updateHijackSequence(dt);
     nearestVehicle = null;
@@ -876,6 +886,7 @@ function loop() {
   if (shouldUpdateHudDom) {
     toggleClassIfChanged(promptEl, 'vehicle-mode', !!inVehicle || !!activeLocation);
     let promptText = '';
+    const blackjackReady = canPlayBlackjack();
     if (jailTimer > 0) promptText = `JAILED · ${Math.ceil(jailTimer)}s`;
     else if (arrestState) promptText = 'POLICE TRANSPORT';
     else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') promptText = '<kbd>F</kbd>REPAIR / REPAINT';
@@ -883,6 +894,7 @@ function loop() {
     else if (canUseShopService(nearestServiceLocation)) promptText = '<kbd>F</kbd>SHOP ITEM';
     else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') promptText = '<kbd>F</kbd>PATCH UP';
     else if (nearestMissionStart) promptText = '<kbd>F</kbd>START MISSION';
+    else if (blackjackReady) promptText = '<kbd>F</kbd>PLAY BLACKJACK';
     else if (activeLocation) promptText = '<kbd>F</kbd>EXIT TO STREET';
     else if (!inVehicle && nearestLocation) promptText = `<kbd>F</kbd>${nearestLocation.prompt}`;
     else if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) promptText = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
@@ -890,8 +902,8 @@ function loop() {
     toggleClassIfChanged(promptEl, 'show', !!promptText);
     if (promptText) setHtmlIfChanged(promptEl, promptText);
     const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
-    const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
-    setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
+    const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (blackjackReady ? 'PLAY' : (activeLocation ? 'EXIT' : 'ENTER')));
+    setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady || blackjackReady), useLabel);
   }
 
   renderer.render(scene, camera);
