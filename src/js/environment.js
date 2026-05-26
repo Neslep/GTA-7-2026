@@ -34,8 +34,10 @@ let visualUpdateTimer = 99;
 let hudUpdateTimer = 99;
 let environmentExposure = renderer.toneMappingExposure;
 let lightningFlash = 0;
+let lightningFlashTarget = 0;
 let lightningCooldown = 8 + Math.random() * 12;
 let activeRainCount = 0;
+let lastRainDrawCount = -1;
 
 const envState = { cloud: 0, rain: 0, storm: 0 };
 const envProfile = {
@@ -201,15 +203,16 @@ function updateWeatherBlend(dt) {
 }
 
 function updateLightning(dt) {
-  lightningFlash = Math.max(0, lightningFlash - dt * 6.5);
+  lightningFlashTarget = Math.max(0, lightningFlashTarget - dt * 3.4);
+  lightningFlash += (lightningFlashTarget - lightningFlash) * Math.min(1, dt * 10);
   if (envState.storm < 0.55) {
-    lightningCooldown = Math.max(3, lightningCooldown - dt * 0.25);
+    lightningCooldown = Math.max(5, lightningCooldown - dt * 0.18);
     return;
   }
   lightningCooldown -= dt;
   if (lightningCooldown <= 0) {
-    lightningFlash = 1;
-    lightningCooldown = 4 + Math.random() * 9;
+    lightningFlashTarget = 0.42 + Math.random() * 0.18;
+    lightningCooldown = 10 + Math.random() * 16;
   }
 }
 
@@ -262,7 +265,10 @@ function updateRain(dt) {
   const targetCount = activeLocation ? 0 : Math.floor(particleBudget * envState.rain);
   activeRainCount += (targetCount - activeRainCount) * Math.min(1, dt * 4);
   const drawCount = Math.min(rainMaxParticles, Math.max(0, Math.round(activeRainCount)));
-  rainGeometry.setDrawRange(0, drawCount);
+  if (drawCount !== lastRainDrawCount) {
+    rainGeometry.setDrawRange(0, drawCount);
+    lastRainDrawCount = drawCount;
+  }
 
   if (drawCount <= 0) {
     rainPoints.visible = false;
@@ -301,6 +307,8 @@ function updateRain(dt) {
       rainSpeeds[i] = 18 + Math.random() * 16;
     }
   }
+  rainPositionAttribute.updateRange.offset = 0;
+  rainPositionAttribute.updateRange.count = drawCount * 3;
   rainPositionAttribute.needsUpdate = true;
 }
 

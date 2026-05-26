@@ -175,12 +175,20 @@ document.querySelectorAll('[data-touch-key]').forEach(button => {
   button.addEventListener('contextmenu', e => e.preventDefault());
 });
 
+let lastMobileControlMode = '';
 function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false, canUseLocation = false, locationLabel = 'ENTER') {
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
-  mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
-  mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
-  mobileCarBtn.textContent = driving ? (canUseLocation ? locationLabel : 'EXIT') : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
-  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle || canUseLocation);
+  const runLabel = driving ? 'BOOST' : 'RUN';
+  const jumpLabel = driving ? 'BRAKE' : 'JUMP';
+  const carLabel = driving ? (canUseLocation ? locationLabel : 'EXIT') : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
+  const ready = driving || canEnterVehicle || canHijackVehicle || canUseLocation;
+  const signature = `${runLabel}|${jumpLabel}|${carLabel}|${ready}`;
+  if (signature === lastMobileControlMode) return;
+  lastMobileControlMode = signature;
+  mobileRunBtn.textContent = runLabel;
+  mobileJumpBtn.textContent = jumpLabel;
+  mobileCarBtn.textContent = carLabel;
+  mobileCarBtn.classList.toggle('ready', ready);
 }
 
 addEventListener('blur', () => {
@@ -223,6 +231,23 @@ let jailTimer = 0;
 let cuffVisual = null;
 const activeProjectiles = [];
 const activeEffects = [];
+const fxGeometries = {
+  muzzleFlame: new ConeGeometry(0.18, 0.7, 10),
+  muzzleCore: new SphereGeometry(0.12, 8, 6),
+  tracer: new BoxGeometry(0.045, 0.045, 4.5),
+  dust: new SphereGeometry(0.12, 6, 5),
+  spark: new BoxGeometry(0.035, 0.035, 0.55),
+};
+
+function disposeObjectMaterials(root) {
+  const materials = new Set();
+  root.traverse(obj => {
+    if (!obj.material) return;
+    if (Array.isArray(obj.material)) obj.material.forEach(mat => materials.add(mat));
+    else materials.add(obj.material);
+  });
+  materials.forEach(mat => mat.dispose());
+}
 
 const missionCatalog = [
   { id: 'bank-delivery', name: 'Bank Delivery', startId: 'bank', targetId: 'garage', seconds: 70, reward: 1200, objective: 'Deliver the bank package to the garage.' },
@@ -1085,12 +1110,12 @@ function spawnMuzzleFlash() {
   const forward = worldForwardFromYaw(player.yaw);
   const flash = new Group();
   const flame = new Mesh(
-    new ConeGeometry(0.18, 0.7, 10),
+    fxGeometries.muzzleFlame,
     new MeshBasicMaterial({ color: 0xffd200, transparent: true, opacity: 0.92 })
   );
   flame.rotation.x = Math.PI / 2;
   const core = new Mesh(
-    new SphereGeometry(0.12, 8, 6),
+    fxGeometries.muzzleCore,
     new MeshBasicMaterial({ color: 0xff5900, transparent: true, opacity: 0.85 })
   );
   flash.add(flame, core);
@@ -1104,7 +1129,7 @@ function spawnMuzzleFlash() {
   activeEffects.push({ group: flash, ttl: 0.08, maxTtl: 0.08, kind: 'flash' });
 
   const tracer = new Mesh(
-    new BoxGeometry(0.045, 0.045, 4.5),
+    fxGeometries.tracer,
     new MeshBasicMaterial({ color: 0xfff4d8, transparent: true, opacity: 0.72 })
   );
   tracer.position.set(
@@ -1119,11 +1144,10 @@ function spawnMuzzleFlash() {
 
 function spawnImpactDust(x, z) {
   const dust = new Group();
+  const dustMat = new MeshBasicMaterial({ color: 0xb8b0a8, transparent: true, opacity: 0.34 });
   for (let i = 0; i < 4; i++) {
-    const puff = new Mesh(
-      new SphereGeometry(0.08 + Math.random() * 0.08, 6, 5),
-      new MeshBasicMaterial({ color: 0xb8b0a8, transparent: true, opacity: 0.34 })
-    );
+    const puff = new Mesh(fxGeometries.dust, dustMat);
+    puff.scale.setScalar(0.65 + Math.random() * 0.65);
     puff.position.set((Math.random() - 0.5) * 0.5, 0.25 + Math.random() * 0.45, (Math.random() - 0.5) * 0.5);
     dust.add(puff);
   }
@@ -1135,11 +1159,11 @@ function spawnImpactDust(x, z) {
 function spawnSparkBurst(x, y, z, intensity = 1) {
   const sparks = new Group();
   const count = Math.min(16, Math.max(6, Math.floor(8 * intensity)));
+  const warmMat = new MeshBasicMaterial({ color: 0xff8a00, transparent: true, opacity: 0.95 });
+  const whiteMat = new MeshBasicMaterial({ color: 0xfff4d8, transparent: true, opacity: 0.95 });
   for (let i = 0; i < count; i++) {
-    const spark = new Mesh(
-      new BoxGeometry(0.035, 0.035, 0.38 + Math.random() * 0.34),
-      new MeshBasicMaterial({ color: Math.random() < 0.35 ? 0xfff4d8 : 0xff8a00, transparent: true, opacity: 0.95 })
-    );
+    const spark = new Mesh(fxGeometries.spark, Math.random() < 0.35 ? whiteMat : warmMat);
+    spark.scale.z = 0.7 + Math.random() * 0.65;
     spark.position.set((Math.random() - 0.5) * 0.45, (Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.45);
     spark.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
     spark.userData.vx = (Math.random() - 0.5) * 5.5 * intensity;
@@ -1206,11 +1230,12 @@ function updateCombatEffects(dt) {
         obj.rotation.y += dt * 12;
       }
       if (obj.material && obj.material.transparent) {
-        if (typeof obj.userData.baseOpacity !== 'number') obj.userData.baseOpacity = obj.material.opacity;
-        obj.material.opacity = obj.userData.baseOpacity * alpha;
+        if (typeof obj.material.userData.baseOpacity !== 'number') obj.material.userData.baseOpacity = obj.material.opacity;
+        obj.material.opacity = obj.material.userData.baseOpacity * alpha;
       }
     });
     if (fx.ttl <= 0) {
+      disposeObjectMaterials(fx.group);
       scene.remove(fx.group);
       activeEffects.splice(i, 1);
     }
@@ -1229,6 +1254,7 @@ function updateCombatEffects(dt) {
     const hit = bodyHit || p.mesh.position.y <= 0.25 || collidesAt(p.mesh.position.x, p.mesh.position.z, 0.25);
     if (hit || p.ttl <= 0) {
       spawnImpactDust(p.mesh.position.x, p.mesh.position.z);
+      if (p.mesh.material) p.mesh.material.dispose();
       scene.remove(p.mesh);
       activeProjectiles.splice(i, 1);
     }

@@ -13,31 +13,31 @@ const GRAPHICS_STORAGE_KEY = 'gta7.graphicsQuality';
 const GRAPHICS_PRESETS = {
   low: {
     label: 'LOW',
-    pixelRatioCap: 1.15,
-    shadowMapSize: 1024,
-    environmentHz: 7,
+    pixelRatioCap: 1,
+    shadowMapSize: 768,
+    environmentHz: 6,
     hudHz: 3,
-    rainParticles: 420,
-    stormParticles: 650,
+    rainParticles: 300,
+    stormParticles: 440,
     rainRadius: 46,
     rainHeight: 34,
     rainSize: 0.95,
     roadWetRoughness: 0.78,
-    lightningExposure: 0.22,
+    lightningExposure: 0.12,
   },
   high: {
     label: 'HIGH',
-    pixelRatioCap: 2,
-    shadowMapSize: 2048,
-    environmentHz: 12,
+    pixelRatioCap: 1.5,
+    shadowMapSize: 1536,
+    environmentHz: 10,
     hudHz: 4,
-    rainParticles: 900,
-    stormParticles: 1400,
+    rainParticles: 640,
+    stormParticles: 900,
     rainRadius: 68,
     rainHeight: 46,
     rainSize: 1.25,
     roadWetRoughness: 0.48,
-    lightningExposure: 0.38,
+    lightningExposure: 0.18,
   },
 };
 
@@ -92,7 +92,7 @@ scene.fog = new Fog(0x2a2a4a, 90, 520);
 const camera = new PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 1000);
 camera.position.set(0, 5, 12);
 
-const renderer = new WebGLRenderer({ antialias: true });
+const renderer = new WebGLRenderer({ antialias: graphicsQuality === 'high', powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFSoftShadowMap;

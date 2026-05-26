@@ -196,18 +196,35 @@ function updateLocationEffects(dt) {
   }
 }
 
+let lastObjectiveFlashAt = 0;
+let lastScreenFlashAt = 0;
+let screenFlashFrameId = 0;
+
 function flashObjectivePanel() {
   if (!objectivePanelEl) return;
+  const now = performance.now();
+  if (now - lastObjectiveFlashAt < 240) return;
+  lastObjectiveFlashAt = now;
   objectivePanelEl.classList.remove('flash');
-  void objectivePanelEl.offsetWidth;
-  objectivePanelEl.classList.add('flash');
+  requestAnimationFrame(() => objectivePanelEl.classList.add('flash'));
 }
 
 function triggerScreenFlash(type = 'impact') {
   if (!screenFlashEl) return;
-  screenFlashEl.className = '';
-  void screenFlashEl.offsetWidth;
-  screenFlashEl.classList.add(`flash-${type}`);
+  if (type === 'impact') {
+    screenFlashEl.classList.remove('flash-impact');
+    return;
+  }
+  const now = performance.now();
+  const minInterval = type === 'impact' ? 220 : 320;
+  if (now - lastScreenFlashAt < minInterval) return;
+  lastScreenFlashAt = now;
+  screenFlashEl.classList.remove('flash-impact', 'flash-alarm', 'flash-success', 'flash-fail');
+  if (screenFlashFrameId) cancelAnimationFrame(screenFlashFrameId);
+  screenFlashFrameId = requestAnimationFrame(() => {
+    screenFlashEl.classList.add(`flash-${type}`);
+    screenFlashFrameId = 0;
+  });
 }
 
 function setHudAlertState(active) {
@@ -736,11 +753,35 @@ const vehicleHealthBarEl = document.getElementById('vehicleHealthBar');
 const minimapWrapEl = document.getElementById('minimap-wrap');
 const districtLabelEl = document.getElementById('districtLabel');
 let frame = 0;
+let hudDomTimer = 99;
+let nearbyVehicleTimer = 99;
+let cachedNearbyVehicleCount = 0;
+
+function setTextIfChanged(el, value) {
+  if (!el) return;
+  const next = String(value);
+  if (el.textContent !== next) el.textContent = next;
+}
+
+function setHtmlIfChanged(el, value) {
+  if (el && el.innerHTML !== value) el.innerHTML = value;
+}
+
+function toggleClassIfChanged(el, className, active) {
+  if (!el) return;
+  const hasClass = el.classList.contains(className);
+  if (hasClass !== active) el.classList.toggle(className, active);
+}
 
 function loop() {
   requestAnimationFrame(loop);
+  if (document.hidden) return;
   const dt = Math.min(0.05, clock.getDelta());
   frame++;
+  hudDomTimer += dt;
+  nearbyVehicleTimer += dt;
+  const shouldUpdateHudDom = hudDomTimer >= 1 / 12;
+  if (shouldUpdateHudDom) hudDomTimer = 0;
 
   if (arrestState) {
     updateArrest(dt);
@@ -793,88 +834,65 @@ function loop() {
   lastPos.copy(ref);
 
   // HUD
-  if (frame % 2 === 0) drawMinimap();
-  if (inVehicle) {
-    kmhEl.textContent = Math.round(Math.abs(inVehicle.velocity) * 3.6);
-    gearEl.textContent = inVehicle.kind === 'truck' || inVehicle.kind === 'policeVan' ? (inVehicle.velocity < -0.5 ? 'TRK-R' : 'TRK') : (inVehicle.velocity < -0.5 ? 'R' : 'D');
+  if (frame % 3 === 0) drawMinimap();
+  if (shouldUpdateHudDom) {
+    if (inVehicle) {
+      setTextIfChanged(kmhEl, Math.round(Math.abs(inVehicle.velocity) * 3.6));
+      setTextIfChanged(gearEl, inVehicle.kind === 'truck' || inVehicle.kind === 'policeVan' ? (inVehicle.velocity < -0.5 ? 'TRK-R' : 'TRK') : (inVehicle.velocity < -0.5 ? 'R' : 'D'));
+    }
+    toggleClassIfChanged(document.body, 'aiming-gun', !inVehicle && !arrestState && jailTimer <= 0 && player.heldType === 'gun');
+    setTextIfChanged(distEl, Math.floor(distanceTraveled));
+    if (locationBadgeEl) {
+      const locLabel = activeLocation ? activeLocation.label : (nearestLocation ? nearestLocation.label : '');
+      setTextIfChanged(locationBadgeEl, wantedLevel > 0 ? `WANTED LEVEL ${wantedLevel}` : locLabel);
+      toggleClassIfChanged(locationBadgeEl, 'show', wantedLevel > 0 || !!locLabel);
+      toggleClassIfChanged(locationBadgeEl, 'alert', wantedLevel > 0);
+    }
+    if (objectivePanelEl) {
+      const showObjective = !!activeMission || wantedLevel > 0 || bankAlarm || (inVehicle && inVehicle.health < 100);
+      toggleClassIfChanged(objectivePanelEl, 'show', showObjective);
+      toggleClassIfChanged(objectivePanelEl, 'alert', wantedLevel > 0 || bankAlarm);
+      setTextIfChanged(objectiveTitleEl, activeMission ? activeMission.name : (wantedLevel > 0 ? 'Wanted' : 'Vehicle Status'));
+      setTextIfChanged(objectiveTextEl, activeMission ? activeMission.statusText : (wantedLevel > 0 ? 'Reach GAS or GARAGE to lose heat.' : `Vehicle health ${Math.round(inVehicle ? inVehicle.health : 100)}%`));
+      setTextIfChanged(objectiveTimerEl, activeMission && activeMission.status === 'active' ? `${Math.ceil(missionTimer)}s` : '');
+      setTextIfChanged(objectiveWantedEl, wantedLevel > 0 ? `WANTED ${wantedLevel}` : '');
+    }
+    updateHudEffects(dt);
+    updateDistrictLabel();
   }
-  document.body.classList.toggle('aiming-gun', !inVehicle && !arrestState && jailTimer <= 0 && player.heldType === 'gun');
-  distEl.textContent = Math.floor(distanceTraveled);
-  if (locationBadgeEl) {
-    const locLabel = activeLocation ? activeLocation.label : (nearestLocation ? nearestLocation.label : '');
-    locationBadgeEl.textContent = wantedLevel > 0 ? `WANTED LEVEL ${wantedLevel}` : locLabel;
-    locationBadgeEl.classList.toggle('show', wantedLevel > 0 || !!locLabel);
-    locationBadgeEl.classList.toggle('alert', wantedLevel > 0);
-  }
-  if (objectivePanelEl) {
-    const showObjective = !!activeMission || wantedLevel > 0 || bankAlarm || (inVehicle && inVehicle.health < 100);
-    objectivePanelEl.classList.toggle('show', showObjective);
-    objectivePanelEl.classList.toggle('alert', wantedLevel > 0 || bankAlarm);
-    objectiveTitleEl.textContent = activeMission ? activeMission.name : (wantedLevel > 0 ? 'Wanted' : 'Vehicle Status');
-    objectiveTextEl.textContent = activeMission ? activeMission.statusText : (wantedLevel > 0 ? 'Reach GAS or GARAGE to lose heat.' : `Vehicle health ${Math.round(inVehicle ? inVehicle.health : 100)}%`);
-    objectiveTimerEl.textContent = activeMission && activeMission.status === 'active' ? `${Math.ceil(missionTimer)}s` : '';
-    objectiveWantedEl.textContent = wantedLevel > 0 ? `WANTED ${wantedLevel}` : '';
-  }
-  updateHudEffects(dt);
-  updateDistrictLabel();
   // Count nearby vehicles
-  let count = 0;
-  for (const v of vehicles) {
-    if (v === inVehicle) continue;
-    if (ref.distanceTo(v.group.position) < 20) count++;
+  if (nearbyVehicleTimer >= 0.25) {
+    let count = 0;
+    for (const v of vehicles) {
+      if (v === inVehicle) continue;
+      if (ref.distanceTo(v.group.position) < 20) count++;
+    }
+    cachedNearbyVehicleCount = count;
+    nearbyVehicleTimer = 0;
   }
-  vnearEl.textContent = count;
+  if (shouldUpdateHudDom) setTextIfChanged(vnearEl, cachedNearbyVehicleCount);
 
   // Prompt
-  promptEl.classList.toggle('vehicle-mode', !!inVehicle || !!activeLocation);
-  if (jailTimer > 0) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = `JAILED · ${Math.ceil(jailTimer)}s`;
+  if (shouldUpdateHudDom) {
+    toggleClassIfChanged(promptEl, 'vehicle-mode', !!inVehicle || !!activeLocation);
+    let promptText = '';
+    if (jailTimer > 0) promptText = `JAILED · ${Math.ceil(jailTimer)}s`;
+    else if (arrestState) promptText = 'POLICE TRANSPORT';
+    else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') promptText = '<kbd>F</kbd>REPAIR / REPAINT';
+    else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'gas') promptText = '<kbd>F</kbd>REFUEL / PATCH';
+    else if (canUseShopService(nearestServiceLocation)) promptText = '<kbd>F</kbd>SHOP ITEM';
+    else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') promptText = '<kbd>F</kbd>PATCH UP';
+    else if (nearestMissionStart) promptText = '<kbd>F</kbd>START MISSION';
+    else if (activeLocation) promptText = '<kbd>F</kbd>EXIT TO STREET';
+    else if (!inVehicle && nearestLocation) promptText = `<kbd>F</kbd>${nearestLocation.prompt}`;
+    else if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) promptText = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
+    else if (inVehicle) promptText = '<kbd>F</kbd>EXIT VEHICLE';
+    toggleClassIfChanged(promptEl, 'show', !!promptText);
+    if (promptText) setHtmlIfChanged(promptEl, promptText);
+    const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
+    const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
+    setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
   }
-  else if (arrestState) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = 'POLICE TRANSPORT';
-  }
-  else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>REPAIR / REPAINT';
-  }
-  else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'gas') {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>REFUEL / PATCH';
-  }
-  else if (canUseShopService(nearestServiceLocation)) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>SHOP ITEM';
-  }
-  else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>PATCH UP';
-  }
-  else if (nearestMissionStart) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>START MISSION';
-  }
-  else if (activeLocation) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>EXIT TO STREET';
-  }
-  else if (!inVehicle && nearestLocation) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = `<kbd>F</kbd>${nearestLocation.prompt}`;
-  }
-  else if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
-  }
-  else if (inVehicle) {
-    promptEl.classList.add('show');
-    promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
-  }
-  else promptEl.classList.remove('show');
-  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
-  const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
-  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
 
   renderer.render(scene, camera);
 }
