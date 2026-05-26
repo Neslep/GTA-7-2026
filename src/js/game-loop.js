@@ -180,6 +180,10 @@ function updateLocationEffects(dt) {
         (0.88 + Math.abs(Math.sin(frame * 0.035 + loc.x * 0.01)) * 0.18);
       loc.light.baseIntensity = loc.light.baseIntensity || loc.light.intensity;
     }
+    if (loc.beacon && loc.beacon.material) {
+      loc.beacon.material.emissiveIntensity = Math.sin(frame * 0.12) > 0 ? 2.8 : 0.4;
+      loc.beacon.visible = Math.sin(frame * 0.12) > -0.2;
+    }
     if (loc.type === 'bar' && loc.danceFloor) {
       const glow = 0.35 + Math.abs(Math.sin(frame * 0.08)) * 0.85;
       loc.danceFloor.material.emissiveIntensity = glow;
@@ -266,6 +270,13 @@ function updateHudEffects(dt) {
   }
 }
 
+function updateDistrictLabel() {
+  if (!districtLabelEl) return;
+  const ref = getPlayerRefPosition();
+  const district = getDistrictAt(ref.x, ref.z);
+  districtLabelEl.textContent = district.label;
+}
+
 function updateCamera(dt) {
   let targetX, targetY, targetZ, lookX, lookY, lookZ;
   if (inVehicle) {
@@ -301,7 +312,7 @@ function updateCamera(dt) {
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
   if (hijackState) return;
-  if (nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
+  if (nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
     startMission(nearestMissionStart);
@@ -696,6 +707,7 @@ const objectiveWantedEl = document.getElementById('objectiveWanted');
 const screenFlashEl = document.getElementById('screenFlash');
 const vehicleHealthBarEl = document.getElementById('vehicleHealthBar');
 const minimapWrapEl = document.getElementById('minimap-wrap');
+const districtLabelEl = document.getElementById('districtLabel');
 let frame = 0;
 
 function loop() {
@@ -767,6 +779,7 @@ function loop() {
     objectiveWantedEl.textContent = wantedLevel > 0 ? `WANTED ${wantedLevel}` : '';
   }
   updateHudEffects(dt);
+  updateDistrictLabel();
   // Count nearby vehicles
   let count = 0;
   for (const v of vehicles) {
@@ -789,6 +802,10 @@ function loop() {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>SHOP ITEM';
   }
+  else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>PATCH UP';
+  }
   else if (nearestMissionStart) {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>START MISSION';
@@ -810,7 +827,7 @@ function loop() {
     promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
   }
   else promptEl.classList.remove('show');
-  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation));
+  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation));
   const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
   setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
 

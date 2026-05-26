@@ -1,6 +1,6 @@
 // -------------------- GROUND --------------------
 const ground = new Mesh(
-  new PlaneGeometry(600, 600),
+  new PlaneGeometry(GRID * BLOCK + 360, GRID * BLOCK + 360),
   new MeshStandardMaterial({ color: 0x3d4a3d, roughness: 0.9 })
 );
 ground.rotation.x = -Math.PI/2;
@@ -61,6 +61,19 @@ for (let i = 0; i <= GRID; i++) {
   }
 }
 
+function makeDistrictMarker(district) {
+  const w = district.xMax - district.xMin;
+  const d = district.zMax - district.zMin;
+  const marker = new Mesh(
+    new PlaneGeometry(w - ROAD, d - ROAD),
+    new MeshBasicMaterial({ color: district.color, transparent: true, opacity: 0.06 })
+  );
+  marker.rotation.x = -Math.PI / 2;
+  marker.position.set((district.xMin + district.xMax) / 2, 0.025, (district.zMin + district.zMax) / 2);
+  scene.add(marker);
+}
+for (const district of cityDistricts) makeDistrictMarker(district);
+
 // -------------------- BUILDINGS --------------------
 const buildings = []; // AABB collision data
 const buildingMeshes = []; // for minimap
@@ -99,8 +112,9 @@ function placeBuilding(cx, cz, blockX, blockZ) {
   tex.needsUpdate = true;
   tex.repeat.set(Math.max(1, Math.round(w/3)), Math.max(1, Math.round(h/3)));
   const baseHue = 0.05 + Math.random() * 0.15;  // warm sunset tones
+  const districtStyle = applyDistrictBuildingStyle(baseHue, cx, cz);
   const mat = new MeshStandardMaterial({
-    color: new Color().setHSL(baseHue, 0.15 + Math.random()*0.2, 0.25 + Math.random()*0.2),
+    color: new Color().setHSL(districtStyle.hue, districtStyle.sat + Math.random()*0.16, districtStyle.light + Math.random()*0.12),
     map: tex,
     roughness: 0.75,
   });
@@ -151,7 +165,8 @@ for (let bx = 0; bx < GRID; bx++) {
       }
       continue;
     }
-    const count = 2 + Math.floor(Math.random()*3);
+    const district = getDistrictAt(cx0, cz0);
+    const count = district.id === 'downtown' ? 3 : (district.id === 'industrial' || district.id === 'harbor' ? 1 + Math.floor(Math.random()*2) : 2 + Math.floor(Math.random()*2));
     for (let n = 0; n < count; n++) {
       const px = cx0 + (Math.random()-0.5) * (usable - 8);
       const pz = cz0 + (Math.random()-0.5) * (usable - 8);
@@ -591,12 +606,134 @@ function makeLocation(opts, index) {
   return loc;
 }
 
+function makeContainerStack(x, z, cols = 3) {
+  const colors = [0x2080ff, 0xff7030, 0x10b070, 0xffd200];
+  for (let i = 0; i < cols; i++) {
+    const c = new Mesh(
+      new BoxGeometry(4, 1.8, 1.8),
+      new MeshStandardMaterial({ color: colors[i % colors.length], roughness: 0.65, metalness: 0.25 })
+    );
+    c.position.set(x + i * 4.4, 0.9, z + (i % 2) * 2.2);
+    c.castShadow = true;
+    scene.add(c);
+  }
+}
+
+function addHelipadProps(loc) {
+  const pad = new Mesh(
+    new CylinderGeometry(7, 7, 0.12, 32),
+    new MeshStandardMaterial({ color: 0x202830, roughness: 0.5, metalness: 0.2 })
+  );
+  pad.position.set(loc.x, 0.12, loc.z + 2);
+  scene.add(pad);
+  const h = makeSign('H', '#88c8ff', '#00c3ff', 4, 4);
+  h.rotation.x = -Math.PI / 2;
+  h.position.set(loc.x, 0.2, loc.z + 2);
+  scene.add(h);
+}
+
+function addHarborProps(loc) {
+  const water = new Mesh(
+    new PlaneGeometry(36, 24),
+    new MeshBasicMaterial({ color: 0x12344a, transparent: true, opacity: 0.55 })
+  );
+  water.rotation.x = -Math.PI / 2;
+  water.position.set(loc.x - 10, 0.03, loc.z - 4);
+  scene.add(water);
+  makeContainerStack(loc.x + 8, loc.z - 4, 4);
+  const crane = new Group();
+  crane.add(new Mesh(new BoxGeometry(0.45, 8, 0.45), new MeshStandardMaterial({ color: 0xffd200, roughness: 0.45 })));
+  const arm = new Mesh(new BoxGeometry(9, 0.35, 0.35), new MeshStandardMaterial({ color: 0xffd200, roughness: 0.45 }));
+  arm.position.set(4.2, 4.1, 0);
+  crane.add(arm);
+  crane.position.set(loc.x - 12, 0, loc.z - 7);
+  scene.add(crane);
+}
+
+function addCasinoProps(loc) {
+  for (let i = 0; i < 5; i++) {
+    const chip = new Mesh(
+      new CylinderGeometry(0.55, 0.55, 0.12, 18),
+      new MeshStandardMaterial({ color: i % 2 ? 0xff3030 : 0x00c3ff, emissive: i % 2 ? 0x401010 : 0x003040, emissiveIntensity: 0.4 })
+    );
+    chip.position.set(loc.x - 5 + i * 2.5, 0.25, loc.entrance.z - 1.8);
+    scene.add(chip);
+  }
+}
+
+function addStadiumProps(loc) {
+  const ring = new Mesh(
+    new CylinderGeometry(16, 16, 5, 48, 1, true),
+    new MeshStandardMaterial({ color: 0x343848, roughness: 0.6, metalness: 0.15, side: DoubleSide })
+  );
+  ring.position.set(loc.x, 2.5, loc.z);
+  scene.add(ring);
+  for (const [dx, dz] of [[-14, -9], [14, -9], [-14, 9], [14, 9]]) {
+    const pole = new Mesh(new CylinderGeometry(0.16, 0.18, 8, 8), new MeshStandardMaterial({ color: 0xd8d8d8, metalness: 0.6 }));
+    pole.position.set(loc.x + dx, 4, loc.z + dz);
+    scene.add(pole);
+  }
+}
+
+function addFireStationProps(loc) {
+  const truck = makeCar(0xd82020);
+  truck.group.position.set(loc.x - 8, 0, loc.entrance.z - 2.5);
+  truck.group.rotation.y = Math.PI / 2;
+  scene.add(truck.group);
+  makeNeonLight(loc.x, 3.2, loc.entrance.z, 0xff3030, 1.2, 16);
+}
+
+function addHospitalProps(loc) {
+  const crossA = new Mesh(new BoxGeometry(1.0, 4.2, 0.18), new MeshBasicMaterial({ color: 0xff3030 }));
+  const crossB = new Mesh(new BoxGeometry(3.0, 1.0, 0.18), new MeshBasicMaterial({ color: 0xff3030 }));
+  crossA.position.set(loc.x, 6.4, loc.z + 8.1);
+  crossB.position.copy(crossA.position);
+  scene.add(crossA, crossB);
+}
+
+function addRadioTowerProps(loc) {
+  const tower = new Group();
+  const mat = new MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.35, metalness: 0.55 });
+  for (const x of [-1.4, 1.4]) {
+    const leg = new Mesh(new CylinderGeometry(0.08, 0.14, 26, 6), mat);
+    leg.position.set(x, 13, 0);
+    leg.rotation.z = x > 0 ? -0.08 : 0.08;
+    tower.add(leg);
+  }
+  for (let y = 4; y < 24; y += 4) {
+    const brace = new Mesh(new BoxGeometry(3.2, 0.08, 0.08), mat);
+    brace.position.y = y;
+    tower.add(brace);
+  }
+  const beacon = new Mesh(new SphereGeometry(0.5, 12, 8), new MeshStandardMaterial({ color: 0xff3030, emissive: 0xff3030, emissiveIntensity: 1.8 }));
+  beacon.position.y = 27;
+  tower.add(beacon);
+  tower.position.set(loc.x, 0, loc.z - 2);
+  scene.add(tower);
+  loc.beacon = beacon;
+}
+
+function decorateLocation(loc) {
+  if (loc.id === 'airport') addHelipadProps(loc);
+  if (loc.id === 'harbor') addHarborProps(loc);
+  if (loc.id === 'casino') addCasinoProps(loc);
+  if (loc.id === 'stadium') addStadiumProps(loc);
+  if (loc.id === 'fire') addFireStationProps(loc);
+  if (loc.id === 'hospital') addHospitalProps(loc);
+  if (loc.id === 'radio') addRadioTowerProps(loc);
+}
+
 function makeLocationProps() {
   makeBillboard(-2, -88, 'MIDNIGHT FM', '#ff5900');
   makeBillboard(72, 8, 'CITY SALE', '#00c3ff');
+  makeBillboard(-128, 126, 'INDUSTRIAL', '#ffd200');
+  makeBillboard(126, 126, 'UPTOWN', '#10b070');
   makeATM(24, -55);
   makeATM(-96, 24);
+  makeContainerStack(-132, 126, 4);
+  makeContainerStack(-92, 112, 3);
   for (const [x, z] of [[-71, -51], [-50, -51], [58, -51], [101, 27], [-17, 64], [20, 67]]) makeBench(x, z);
+  for (const [x, z] of [[-112, -126], [-96, -124], [120, 108], [138, 102], [104, 138]]) makeBench(x, z);
   for (const [x, z] of [[-71, -55], [-52, -56], [58, -56], [99, 31], [-20, 69], [23, 70], [62, 70]]) makeTrashCan(x, z);
 
   makeSceneActor(-70, -54, 0xff5900, 'dance');
@@ -607,6 +744,10 @@ function makeLocationProps() {
   makeSceneActor(97, 26, 0xffd200, 'idle');
   makeSceneActor(-16, 67, 0xff7030, 'idle');
   makeSceneActor(18, 65, 0xf0f0f0, 'idle');
+  makeSceneActor(-116, -126, 0x00c3ff, 'idle');
+  makeSceneActor(-108, -124, 0xffd200, 'idle');
+  makeSceneActor(118, 110, 0x10b070, 'idle');
+  makeSceneActor(128, 104, 0xff7030, 'idle');
 }
 
 makeLocation({
@@ -690,5 +831,112 @@ makeLocation({
   signGlow: '#00c3ff',
   x: 62, z: 62, w: 17, d: 11, h: 8,
 }, 5);
+
+decorateLocation(makeLocation({
+  id: 'airport',
+  type: 'airport',
+  label: 'HELIPAD',
+  prompt: 'VISIT HELIPAD',
+  mapColor: '#88c8ff',
+  markerColor: 0x88c8ff,
+  color: 0x263240,
+  lightColor: 0x88c8ff,
+  signColor: '#d8f4ff',
+  signGlow: '#00c3ff',
+  x: -140, z: -140, w: 30, d: 18, h: 7,
+}, 6));
+decorateLocation(makeLocation({
+  id: 'harbor',
+  type: 'harbor',
+  label: 'HARBOR',
+  prompt: 'ENTER HARBOR',
+  mapColor: '#2fd4ff',
+  markerColor: 0x2fd4ff,
+  color: 0x23384a,
+  lightColor: 0x00c3ff,
+  signColor: '#b8f2ff',
+  signGlow: '#00c3ff',
+  x: -100, z: -140, w: 24, d: 18, h: 7,
+}, 7));
+decorateLocation(makeLocation({
+  id: 'casino',
+  type: 'casino',
+  label: 'CASINO',
+  prompt: 'ENTER CASINO',
+  mapColor: '#ff00cc',
+  markerColor: 0xff00cc,
+  color: 0x2a1438,
+  lightColor: 0xff00cc,
+  signColor: '#ffb8f2',
+  signGlow: '#ff00cc',
+  x: 100, z: -100, w: 22, d: 16, h: 13,
+  emissive: 0x240018,
+  emissiveIntensity: 0.16,
+}, 8));
+decorateLocation(makeLocation({
+  id: 'hotel',
+  type: 'hotel',
+  label: 'HOTEL',
+  prompt: 'ENTER HOTEL',
+  mapColor: '#ffd200',
+  markerColor: 0xffd200,
+  color: 0x544436,
+  lightColor: 0xffd200,
+  signColor: '#fff2a0',
+  signGlow: '#ffd200',
+  x: 140, z: -60, w: 18, d: 14, h: 22,
+}, 9));
+decorateLocation(makeLocation({
+  id: 'stadium',
+  type: 'stadium',
+  label: 'STADIUM',
+  prompt: 'ENTER STADIUM',
+  mapColor: '#f0f0f0',
+  markerColor: 0xf0f0f0,
+  color: 0x343848,
+  lightColor: 0xf0f0f0,
+  signColor: '#ffffff',
+  signGlow: '#88c8ff',
+  x: 100, z: -140, w: 34, d: 22, h: 6,
+}, 10));
+decorateLocation(makeLocation({
+  id: 'fire',
+  type: 'fire',
+  label: 'FIRE',
+  prompt: 'ENTER FIRE STATION',
+  mapColor: '#ff3030',
+  markerColor: 0xff3030,
+  color: 0x542020,
+  lightColor: 0xff3030,
+  signColor: '#ffd0d0',
+  signGlow: '#ff3030',
+  x: -100, z: 100, w: 22, d: 14, h: 8,
+}, 11));
+decorateLocation(makeLocation({
+  id: 'hospital',
+  type: 'hospital',
+  label: 'HOSPITAL',
+  prompt: 'ENTER HOSPITAL',
+  mapColor: '#ff3030',
+  markerColor: 0xff3030,
+  color: 0xe8e8e8,
+  lightColor: 0xff3030,
+  signColor: '#ffffff',
+  signGlow: '#ff3030',
+  x: 100, z: 100, w: 24, d: 16, h: 12,
+}, 12));
+decorateLocation(makeLocation({
+  id: 'radio',
+  type: 'radio',
+  label: 'RADIO',
+  prompt: 'VISIT RADIO TOWER',
+  mapColor: '#00c3ff',
+  markerColor: 0x00c3ff,
+  color: 0x273448,
+  lightColor: 0x00c3ff,
+  signColor: '#b8f2ff',
+  signGlow: '#00c3ff',
+  x: -140, z: 100, w: 18, d: 12, h: 9,
+}, 13));
 
 makeLocationProps();

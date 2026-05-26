@@ -133,7 +133,7 @@ function makeMotorbike(color = 0xff7030) {
 const vehicles = [];
 const carColors = [0xe83030, 0x2080ff, 0xffd200, 0x10b070, 0xff7030, 0xa040c0, 0xf0f0f0, 0x202028];
 const bikeColors = [0xff3030, 0xffd200, 0x2080ff, 0x10b070, 0xf0f0f0];
-const PARKED = 12;
+const PARKED = 18;
 for (let i = 0; i < PARKED; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const car = makeCar(col);
@@ -168,7 +168,7 @@ for (let i = 0; i < PARKED; i++) {
   });
 }
 
-const PARKED_BIKES = 7;
+const PARKED_BIKES = 10;
 for (let i = 0; i < PARKED_BIKES; i++) {
   const col = bikeColors[Math.floor(Math.random()*bikeColors.length)];
   const bike = makeMotorbike(col);
@@ -202,7 +202,7 @@ for (let i = 0; i < PARKED_BIKES; i++) {
 
 // -------------------- AI TRAFFIC --------------------
 const aiCars = [];
-const TRAFFIC_COUNT = 14;
+const TRAFFIC_COUNT = 22;
 for (let i = 0; i < TRAFFIC_COUNT; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const car = makeCar(col);
@@ -220,8 +220,10 @@ for (let i = 0; i < TRAFFIC_COUNT; i++) {
     car.group.position.set(-HALF + laneIndex * BLOCK + laneOff, 0, startPos);
     car.group.rotation.y = direction > 0 ? 0 : Math.PI;
   }
+  const district = getDistrictAt(car.group.position.x, car.group.position.z);
+  const districtSpeedBoost = district.id === 'downtown' ? 2 : (district.id === 'industrial' ? -2 : 0);
   aiCars.push({
-    ...car, horizontal, laneIndex, direction, speed: 8 + Math.random() * 8,
+    ...car, horizontal, laneIndex, direction, speed: 8 + districtSpeedBoost + Math.random() * 8,
     laneOff
   });
 }
@@ -299,7 +301,7 @@ function makePed() {
   return { group: g, body, head, legs, leftLeg, rightLeg, arms, leftArm, rightArm, hitFlash };
 }
 const peds = [];
-const PED_COUNT = 22;
+const PED_COUNT = 34;
 for (let i = 0; i < PED_COUNT; i++) {
   const p = makePed();
   // Place on a random sidewalk
@@ -308,6 +310,11 @@ for (let i = 0; i < PED_COUNT; i++) {
   const cx0 = -HALF + bx * BLOCK + BLOCK/2;
   const cz0 = -HALF + bz * BLOCK + BLOCK/2;
   p.group.position.set(cx0 + (Math.random()-0.5)*BLOCK*0.6, 0, cz0 + (Math.random()-0.5)*BLOCK*0.6);
+  const district = getDistrictAt(p.group.position.x, p.group.position.z);
+  if (district.id === 'industrial' && Math.random() < 0.45) {
+    p.group.position.x = 60 + Math.random() * 70;
+    p.group.position.z = 60 + Math.random() * 70;
+  }
   const dir = Math.random() * Math.PI * 2;
   p.group.rotation.y = dir;
   scene.add(p.group);
