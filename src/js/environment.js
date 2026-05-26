@@ -67,7 +67,6 @@ const groundWetColor = new Color(0x283a31);
 const envTimeEl = document.getElementById('envTime');
 const envPhaseEl = document.getElementById('envPhase');
 const envWeatherEl = document.getElementById('envWeather');
-const envQualityEl = document.getElementById('envQuality');
 
 function sampleDayProfile(hour) {
   let a = DAY_STOPS[0];
@@ -95,7 +94,7 @@ function sampleDayProfile(hour) {
 }
 
 function getEnvironmentPreset() {
-  return GRAPHICS_PRESETS[graphicsQuality] || GRAPHICS_PRESETS.high;
+  return GFX;
 }
 
 function getWeatherTarget() {
@@ -158,7 +157,7 @@ function makeRainTexture() {
   return tex;
 }
 
-const rainMaxParticles = GRAPHICS_PRESETS.high.stormParticles;
+const rainMaxParticles = GFX.stormParticles;
 const rainPositions = new Float32Array(rainMaxParticles * 3);
 const rainSpeeds = new Float32Array(rainMaxParticles);
 const rainGeometry = new THREE.BufferGeometry();
@@ -169,7 +168,7 @@ rainGeometry.setDrawRange(0, 0);
 const rainMaterial = new THREE.PointsMaterial({
   color: 0xb8d8ff,
   map: makeRainTexture(),
-  size: getEnvironmentPreset().rainSize,
+  size: GFX.rainSize,
   transparent: true,
   opacity: 0,
   depthWrite: false,
@@ -181,8 +180,8 @@ rainPoints.visible = false;
 scene.add(rainPoints);
 
 function resetRainDrop(i, randomY = false) {
-  const radius = GRAPHICS_PRESETS.high.rainRadius;
-  const height = GRAPHICS_PRESETS.high.rainHeight;
+  const radius = GFX.rainRadius;
+  const height = GFX.rainHeight;
   const angle = Math.random() * Math.PI * 2;
   const dist = Math.sqrt(Math.random()) * radius;
   const p = i * 3;
@@ -258,9 +257,7 @@ function applyEnvironmentLook() {
 
 function updateRain(dt) {
   const preset = getEnvironmentPreset();
-  const stormBudget = graphicsQuality === 'low'
-    ? MathUtils.lerp(preset.rainParticles, preset.stormParticles, 0.35)
-    : preset.stormParticles;
+  const stormBudget = GFX.stormParticles;
   const particleBudget = MathUtils.lerp(preset.rainParticles, stormBudget, envState.storm);
   const targetCount = activeLocation ? 0 : Math.floor(particleBudget * envState.rain);
   activeRainCount += (targetCount - activeRainCount) * Math.min(1, dt * 4);
@@ -285,7 +282,7 @@ function updateRain(dt) {
 
   rainPoints.visible = true;
   rainPoints.position.set(ref.x, 0, ref.z);
-  rainMaterial.opacity = MathUtils.lerp(0.18, 0.48, rainPower) * (graphicsQuality === 'low' ? 0.8 : 1);
+  rainMaterial.opacity = MathUtils.lerp(0.18, 0.48, rainPower);
   rainMaterial.size = preset.rainSize * (1 + envState.storm * 0.22);
   rainMaterial.color.copy(envColorA.setHex(envState.storm > 0.5 ? 0xd8e8ff : 0xb8d8ff));
 
@@ -319,7 +316,6 @@ function updateEnvironmentHud(force = false) {
   if (envTimeEl) envTimeEl.textContent = formatGameTime(environmentHour);
   if (envPhaseEl) envPhaseEl.textContent = getDayPhaseLabel(environmentHour);
   if (envWeatherEl) envWeatherEl.textContent = WEATHER_LABELS[environmentWeather] || 'CLEAR';
-  if (envQualityEl) envQualityEl.textContent = preset.label;
 }
 
 function updateEnvironment(dt) {
@@ -344,12 +340,7 @@ function updateEnvironment(dt) {
   updateEnvironmentHud();
 }
 
-addEventListener('graphicsqualitychange', () => {
-  visualUpdateTimer = 99;
-  hudUpdateTimer = 99;
-  applyEnvironmentLook();
-  updateEnvironmentHud(true);
-});
+
 
 addEventListener('keydown', e => {
   if (e.repeat || !hud.classList.contains('active')) return;

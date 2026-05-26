@@ -29,7 +29,6 @@ for (let i = 0; i <= GRID; i++) {
     const sw = new Mesh(new BoxGeometry(GRID*BLOCK + ROAD, 0.25, 1.6), sidewalkMat);
     sw.position.set(0, 0.12, pos + dz);
     sw.receiveShadow = true;
-    sw.castShadow = true;
     roadsGroup.add(sw);
   }
   // Vertical road
@@ -131,11 +130,10 @@ function placeBuilding(cx, cz, blockX, blockZ) {
   // Occasional rooftop antenna
   if (h > 18 && Math.random() < 0.5) {
     const ant = new Mesh(
-      new CylinderGeometry(0.05, 0.05, 4 + Math.random()*4, 6),
-      new MeshStandardMaterial({ color: 0x222226 })
+      new CylinderGeometry(0.05, 0.05, 4 + Math.random()*4, 4),
+      new MeshLambertMaterial({ color: 0x222226 })
     );
     ant.position.set(cx + (Math.random()-0.5)*w*0.6, h + 2, cz + (Math.random()-0.5)*d*0.6);
-    ant.castShadow = true;
     scene.add(ant);
   }
 }
@@ -178,15 +176,14 @@ for (let bx = 0; bx < GRID; bx++) {
 function makeTree(x, z) {
   const g = new Group();
   const trunk = new Mesh(
-    new CylinderGeometry(0.25, 0.35, 2.5, 6),
-    new MeshStandardMaterial({ color: 0x4a3020, roughness: 0.9 })
+    new CylinderGeometry(0.25, 0.35, 2.5, 5),
+    new MeshLambertMaterial({ color: 0x4a3020 })
   );
   trunk.position.y = 1.25;
-  trunk.castShadow = true;
   g.add(trunk);
   const foliage = new Mesh(
-    new SphereGeometry(1.6 + Math.random()*0.6, 8, 6),
-    new MeshStandardMaterial({ color: new Color().setHSL(0.28 + Math.random()*0.05, 0.6, 0.3) })
+    new SphereGeometry(1.6 + Math.random()*0.6, 6, 5),
+    new MeshLambertMaterial({ color: new Color().setHSL(0.28 + Math.random()*0.05, 0.6, 0.3) })
   );
   foliage.position.y = 3.2;
   foliage.castShadow = true;
@@ -215,19 +212,19 @@ for (let i = 0; i <= GRID; i++) {
 function makeLamp(x, z) {
   const g = new Group();
   const pole = new Mesh(
-    new CylinderGeometry(0.1, 0.12, 5, 6),
-    new MeshStandardMaterial({ color: 0x222226 })
+    new CylinderGeometry(0.1, 0.12, 5, 5),
+    new MeshLambertMaterial({ color: 0x222226 })
   );
-  pole.position.y = 2.5; pole.castShadow = true;
+  pole.position.y = 2.5;
   g.add(pole);
   const arm = new Mesh(
     new BoxGeometry(1.2, 0.1, 0.1),
-    new MeshStandardMaterial({ color: 0x222226 })
+    new MeshLambertMaterial({ color: 0x222226 })
   );
   arm.position.set(0.6, 4.95, 0);
   g.add(arm);
   const bulb = new Mesh(
-    new SphereGeometry(0.18, 8, 6),
+    new SphereGeometry(0.18, 6, 4),
     new MeshStandardMaterial({ color: 0xffe4b5, emissive: 0xffd28a, emissiveIntensity: 1.5 })
   );
   bulb.position.set(1.2, 4.85, 0);
@@ -370,8 +367,8 @@ function makeNeonLight(x, y, z, color, intensity = 1.8, distance = 18) {
 function makeBench(x, z) {
   [x, z] = findSafePoint(x, z, 1.4);
   const g = new Group();
-  const mat = new MeshStandardMaterial({ color: 0x6a3a20, roughness: 0.75 });
-  const metal = new MeshStandardMaterial({ color: 0x202028, roughness: 0.55, metalness: 0.4 });
+  const mat = new MeshLambertMaterial({ color: 0x6a3a20 });
+  const metal = new MeshLambertMaterial({ color: 0x202028 });
   const seat = new Mesh(new BoxGeometry(2.4, 0.18, 0.55), mat);
   seat.position.y = 0.72;
   const back = new Mesh(new BoxGeometry(2.4, 0.16, 0.48), mat);
@@ -392,11 +389,10 @@ function makeBench(x, z) {
 function makeTrashCan(x, z) {
   [x, z] = findSafePoint(x, z, 0.9);
   const can = new Mesh(
-    new CylinderGeometry(0.35, 0.42, 0.9, 10),
-    new MeshStandardMaterial({ color: 0x2b6b54, roughness: 0.8, metalness: 0.2 })
+    new CylinderGeometry(0.35, 0.42, 0.9, 6),
+    new MeshLambertMaterial({ color: 0x2b6b54 })
   );
   can.position.set(x, 0.45, z);
-  can.castShadow = true;
   scene.add(can);
   placedProps.push({ x, z, radius: 1.0 });
 }
@@ -406,10 +402,9 @@ function makeATM(x, z) {
   const g = new Group();
   const body = new Mesh(
     new BoxGeometry(1.4, 2.1, 0.65),
-    new MeshStandardMaterial({ color: 0x1d2430, roughness: 0.45, metalness: 0.25 })
+    new MeshLambertMaterial({ color: 0x1d2430 })
   );
   body.position.y = 1.05;
-  body.castShadow = true;
   const screen = new Mesh(
     new BoxGeometry(0.85, 0.45, 0.05),
     new MeshStandardMaterial({ color: 0x88c8ff, emissive: 0x00c3ff, emissiveIntensity: 0.8 })
@@ -424,8 +419,8 @@ function makeATM(x, z) {
 function makeBillboard(x, z, text, color = '#00c3ff') {
   [x, z] = findSafePoint(x, z, 2.4);
   const g = new Group();
-  const poleMat = new MeshStandardMaterial({ color: 0x24242c, roughness: 0.65, metalness: 0.45 });
-  const pole = new Mesh(new CylinderGeometry(0.12, 0.16, 5.4, 8), poleMat);
+  const poleMat = new MeshLambertMaterial({ color: 0x24242c });
+  const pole = new Mesh(new CylinderGeometry(0.12, 0.16, 5.4, 5), poleMat);
   pole.position.y = 2.7;
   const board = makeSign(text, color, '#ff5900', 8.5, 2.8);
   board.position.set(0, 5.5, 0.08);

@@ -8,91 +8,41 @@ const { Scene, PerspectiveCamera, WebGLRenderer, Color, Fog, PCFSoftShadowMap,
   MeshStandardMaterial, MeshBasicMaterial, MeshLambertMaterial,
   CanvasTexture, RepeatWrapping, DoubleSide } = THREE;
 
-// -------------------- GRAPHICS QUALITY --------------------
-const GRAPHICS_STORAGE_KEY = 'gta7.graphicsQuality';
-const GRAPHICS_PRESETS = {
-  low: {
-    label: 'LOW',
-    pixelRatioCap: 1,
-    shadowMapSize: 768,
-    environmentHz: 6,
-    hudHz: 3,
-    rainParticles: 300,
-    stormParticles: 440,
-    rainRadius: 46,
-    rainHeight: 34,
-    rainSize: 0.95,
-    roadWetRoughness: 0.78,
-    lightningExposure: 0.12,
-  },
-  high: {
-    label: 'HIGH',
-    pixelRatioCap: 1.5,
-    shadowMapSize: 1536,
-    environmentHz: 10,
-    hudHz: 4,
-    rainParticles: 640,
-    stormParticles: 900,
-    rainRadius: 68,
-    rainHeight: 46,
-    rainSize: 1.25,
-    roadWetRoughness: 0.48,
-    lightningExposure: 0.18,
-  },
+// -------------------- OPTIMIZED GRAPHICS PRESET --------------------
+const GFX = {
+  pixelRatioCap: 1,
+  shadowMapSize: 1024,
+  environmentHz: 8,
+  hudHz: 4,
+  rainParticles: 400,
+  stormParticles: 600,
+  rainRadius: 52,
+  rainHeight: 38,
+  rainSize: 1.1,
+  roadWetRoughness: 0.58,
+  lightningExposure: 0.15,
 };
 
-function getStoredGraphicsQuality() {
-  try {
-    const saved = localStorage.getItem(GRAPHICS_STORAGE_KEY);
-    return GRAPHICS_PRESETS[saved] ? saved : null;
-  } catch (err) {
-    return null;
-  }
-}
-
-function getDefaultGraphicsQuality() {
-  const touchLikely = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-  return touchLikely || innerWidth < 820 ? 'low' : 'high';
-}
-
-let graphicsQuality = getStoredGraphicsQuality() || getDefaultGraphicsQuality();
-
-function applyGraphicsPresetToRenderer() {
-  const preset = GRAPHICS_PRESETS[graphicsQuality] || GRAPHICS_PRESETS.high;
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, preset.pixelRatioCap));
+function applyGfxSettings() {
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, GFX.pixelRatioCap));
   if (sun && sun.shadow) {
-    const nextSize = preset.shadowMapSize;
-    if (sun.shadow.mapSize.x !== nextSize || sun.shadow.mapSize.y !== nextSize) {
-      sun.shadow.mapSize.set(nextSize, nextSize);
-      if (sun.shadow.map) {
-        sun.shadow.map.dispose();
-        sun.shadow.map = null;
-      }
+    const sz = GFX.shadowMapSize;
+    if (sun.shadow.mapSize.x !== sz) {
+      sun.shadow.mapSize.set(sz, sz);
+      if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
   }
-  document.body.dataset.graphicsQuality = graphicsQuality;
-}
-
-function setGraphicsQuality(nextQuality, persist = true) {
-  if (!GRAPHICS_PRESETS[nextQuality]) return graphicsQuality;
-  graphicsQuality = nextQuality;
-  if (persist) {
-    try { localStorage.setItem(GRAPHICS_STORAGE_KEY, graphicsQuality); } catch (err) {}
-  }
-  applyGraphicsPresetToRenderer();
-  dispatchEvent(new CustomEvent('graphicsqualitychange', { detail: { quality: graphicsQuality } }));
-  return graphicsQuality;
 }
 
 // -------------------- RENDERER / SCENE --------------------
 const scene = new Scene();
 scene.background = new Color(0x16182a);
-scene.fog = new Fog(0x2a2a4a, 90, 520);
+scene.fog = new Fog(0x2a2a4a, 80, 380);
 
-const camera = new PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 1000);
+const camera = new PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 500);
 camera.position.set(0, 5, 12);
 
-const renderer = new WebGLRenderer({ antialias: graphicsQuality === 'high', powerPreference: 'high-performance' });
+const renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFSoftShadowMap;
@@ -103,7 +53,7 @@ document.body.appendChild(renderer.domElement);
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  applyGraphicsPresetToRenderer();
+  applyGfxSettings();
   renderer.setSize(innerWidth, innerHeight);
 });
 
@@ -116,14 +66,14 @@ scene.add(hemiLight);
 const sun = new DirectionalLight(0xffd28a, 1.25);
 sun.position.set(80, 110, 35);
 sun.castShadow = true;
-const SH = 240;
+const SH = 160;
 sun.shadow.camera.left = -SH; sun.shadow.camera.right = SH;
 sun.shadow.camera.top = SH; sun.shadow.camera.bottom = -SH;
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 400;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 320;
+sun.shadow.mapSize.set(GFX.shadowMapSize, GFX.shadowMapSize);
 sun.shadow.bias = -0.0005;
 scene.add(sun);
-applyGraphicsPresetToRenderer();
+applyGfxSettings();
 
 // -------------------- WORLD CONFIG --------------------
 const BLOCK = 40;      // size of one city block including road

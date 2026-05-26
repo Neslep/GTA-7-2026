@@ -844,7 +844,7 @@ function loop() {
   lastPos.copy(ref);
 
   // HUD
-  if (frame % 3 === 0) drawMinimap();
+  if (frame % 4 === 0) drawMinimap();
   if (shouldUpdateHudDom) {
     if (inVehicle) {
       setTextIfChanged(kmhEl, Math.round(Math.abs(inVehicle.velocity) * 3.6));
@@ -871,7 +871,7 @@ function loop() {
     updateDistrictLabel();
   }
   // Count nearby vehicles
-  if (nearbyVehicleTimer >= 0.25) {
+  if (nearbyVehicleTimer >= 0.5) {
     let count = 0;
     for (const v of vehicles) {
       if (v === inVehicle) continue;

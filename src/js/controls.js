@@ -35,23 +35,9 @@ const mobileRunBtn = document.getElementById('mobileRunBtn');
 const mobileJumpBtn = document.getElementById('mobileJumpBtn');
 const mobileCarBtn = document.getElementById('mobileCarBtn');
 const mobileHitBtn = document.getElementById('mobileHitBtn');
-const qualityButtons = document.querySelectorAll('[data-quality]');
+const qualityButtons = [];
 
 if (hasTouchControls) document.body.classList.add('touch-ui');
-
-function syncGraphicsQualityButtons() {
-  for (const button of qualityButtons) {
-    button.classList.toggle('active', button.dataset.quality === graphicsQuality);
-  }
-}
-
-qualityButtons.forEach(button => {
-  button.addEventListener('click', () => {
-    setGraphicsQuality(button.dataset.quality);
-    syncGraphicsQualityButtons();
-  });
-});
-syncGraphicsQualityButtons();
 
 function requestGamePointerLock() {
   if (hasTouchControls || !renderer.domElement.requestPointerLock) return;
@@ -1646,7 +1632,7 @@ function updatePlayer(dt) {
   }
   // Mouse look
   camYaw.v -= mouse.dx * 0.0025;
-  camPitch.v -= mouse.dy * 0.0025;
+  camPitch.v += mouse.dy * 0.0025;
   camPitch.v = Math.max(-0.6, Math.min(0.7, camPitch.v));
   mouse.dx = 0; mouse.dy = 0;
 
@@ -1699,8 +1685,8 @@ function updatePlayer(dt) {
   if (moving) {
     const target = Math.atan2(wx, wz);
     let diff = target - player.yaw;
-    while (diff > Math.PI) diff -= Math.PI*2;
-    while (diff < -Math.PI) diff += Math.PI*2;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
     player.yaw += diff * Math.min(1, dt * 12);
     player.group.rotation.y = player.yaw;
   }
@@ -1753,7 +1739,7 @@ function updateVehicle(dt, veh) {
     if (veh.velocity > 0) veh.velocity = Math.max(0, veh.velocity - 22 * dt);
     else veh.velocity = Math.min(0, veh.velocity + 22 * dt);
   }
-  veh.velocity = Math.max(-maxSpeed/2, Math.min(maxSpeed, veh.velocity));
+  veh.velocity = Math.max(-maxSpeed / 2, Math.min(maxSpeed, veh.velocity));
 
   // Steering: A=left, D=right
   const steer = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
@@ -1774,7 +1760,7 @@ function updateVehicle(dt, veh) {
   [nx, nz] = resolveCollision(before[0], before[1], nx, nz, isBike ? 0.8 : 1.4);
   // If we collided, kill speed
   if (Math.abs(nx - (before[0] + dirX * veh.velocity * dt)) > 0.01 ||
-      Math.abs(nz - (before[1] + dirZ * veh.velocity * dt)) > 0.01) {
+    Math.abs(nz - (before[1] + dirZ * veh.velocity * dt)) > 0.01) {
     damageVehicle(veh, Math.min(18, Math.abs(veh.velocity) * 0.8));
     veh.velocity *= 0.3;
   }

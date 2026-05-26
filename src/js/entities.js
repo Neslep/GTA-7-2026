@@ -24,7 +24,6 @@ function makeCar(color = 0xff3030) {
     new MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.5 })
   );
   doorPanel.position.set(0, 0, -0.55);
-  doorPanel.castShadow = true;
   leftDoor.add(doorPanel);
   g.add(leftDoor);
   // Windshield reflection strip
@@ -36,14 +35,13 @@ function makeCar(color = 0xff3030) {
   ws.rotation.x = -0.3;
   g.add(ws);
   // Wheels
-  const wheelGeo = new CylinderGeometry(0.42, 0.42, 0.35, 12);
-  const wheelMat = new MeshStandardMaterial({ color: 0x111114, roughness: 0.9 });
+  const wheelGeo = new CylinderGeometry(0.42, 0.42, 0.35, 8);
+  const wheelMat = new MeshLambertMaterial({ color: 0x111114 });
   const wheels = [];
   for (const [x, z] of [[-1.05, 1.3], [1.05, 1.3], [-1.05, -1.3], [1.05, -1.3]]) {
     const w = new Mesh(wheelGeo, wheelMat);
     w.position.set(x, 0.42, z);
     w.rotation.z = Math.PI/2;
-    w.castShadow = true;
     g.add(w);
     wheels.push(w);
   }
@@ -88,18 +86,16 @@ function makePickup(color = 0x2080ff) {
   leftDoor.position.set(-1.16, 0.98, 1.48);
   const doorPanel = new Mesh(new BoxGeometry(0.08, 0.72, 1.05), paint);
   doorPanel.position.set(0, 0, -0.46);
-  doorPanel.castShadow = true;
   leftDoor.add(doorPanel);
   g.add(leftDoor);
 
-  const wheelGeo = new CylinderGeometry(0.48, 0.48, 0.38, 14);
-  const wheelMat = new MeshStandardMaterial({ color: 0x101014, roughness: 0.9 });
+  const wheelGeo = new CylinderGeometry(0.48, 0.48, 0.38, 10);
+  const wheelMat = new MeshLambertMaterial({ color: 0x101014 });
   const wheels = [];
   for (const [x, z] of [[-1.18, 1.65], [1.18, 1.65], [-1.18, -1.65], [1.18, -1.65]]) {
     const w = new Mesh(wheelGeo, wheelMat);
     w.position.set(x, 0.47, z);
     w.rotation.z = Math.PI / 2;
-    w.castShadow = true;
     g.add(w);
     wheels.push(w);
   }
@@ -132,18 +128,16 @@ function makeTruck(color = 0xf0f0f0) {
   leftDoor.position.set(-1.26, 1.05, 2.26);
   const doorPanel = new Mesh(new BoxGeometry(0.08, 0.9, 1.05), cabMat);
   doorPanel.position.set(0, 0, -0.5);
-  doorPanel.castShadow = true;
   leftDoor.add(doorPanel);
   g.add(leftDoor);
 
-  const wheelGeo = new CylinderGeometry(0.55, 0.55, 0.42, 16);
-  const wheelMat = new MeshStandardMaterial({ color: 0x0e0e12, roughness: 0.92 });
+  const wheelGeo = new CylinderGeometry(0.55, 0.55, 0.42, 10);
+  const wheelMat = new MeshLambertMaterial({ color: 0x0e0e12 });
   const wheels = [];
   for (const [x, z] of [[-1.32, 2.1], [1.32, 2.1], [-1.32, -0.65], [1.32, -0.65], [-1.32, -2.25], [1.32, -2.25]]) {
     const w = new Mesh(wheelGeo, wheelMat);
     w.position.set(x, 0.55, z);
     w.rotation.z = Math.PI / 2;
-    w.castShadow = true;
     g.add(w);
     wheels.push(w);
   }
@@ -183,21 +177,19 @@ function makeMotorbike(color = 0xff7030) {
   const frameMat = new MeshStandardMaterial({ color: 0x15151c, roughness: 0.42, metalness: 0.65 });
   const accentMat = new MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.45 });
   const chromeMat = new MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.28, metalness: 0.8 });
-  const tireMat = new MeshStandardMaterial({ color: 0x0d0d10, roughness: 0.92 });
+  const tireMat = new MeshLambertMaterial({ color: 0x0d0d10 });
 
   const wheels = [];
   for (const z of [1.15, -1.15]) {
-    const wheel = new Mesh(new CylinderGeometry(0.46, 0.46, 0.18, 18), tireMat);
+    const wheel = new Mesh(new CylinderGeometry(0.46, 0.46, 0.18, 10), tireMat);
     wheel.position.set(0, 0.46, z);
     wheel.rotation.z = Math.PI / 2;
-    wheel.castShadow = true;
     g.add(wheel);
     wheels.push(wheel);
 
-    const hub = new Mesh(new CylinderGeometry(0.18, 0.18, 0.22, 12), chromeMat);
+    const hub = new Mesh(new CylinderGeometry(0.18, 0.18, 0.22, 8), chromeMat);
     hub.position.copy(wheel.position);
     hub.rotation.z = Math.PI / 2;
-    hub.castShadow = true;
     g.add(hub);
   }
 
@@ -208,18 +200,15 @@ function makeMotorbike(color = 0xff7030) {
 
   const seat = new Mesh(new BoxGeometry(0.54, 0.16, 0.82), frameMat);
   seat.position.set(0, 1.18, -0.28);
-  seat.castShadow = true;
   g.add(seat);
 
   const fork = new Mesh(new BoxGeometry(0.12, 0.92, 0.1), chromeMat);
   fork.position.set(0, 0.88, 1.0);
   fork.rotation.x = -0.28;
-  fork.castShadow = true;
   g.add(fork);
 
   const handlebar = new Mesh(new BoxGeometry(1.05, 0.09, 0.12), chromeMat);
   handlebar.position.set(0, 1.42, 0.86);
-  handlebar.castShadow = true;
   g.add(handlebar);
 
   const headlight = new Mesh(
@@ -313,7 +302,7 @@ for (let i = 0; i < PARKED_BIKES; i++) {
 
 // -------------------- AI TRAFFIC --------------------
 const aiCars = [];
-const TRAFFIC_COUNT = 22;
+const TRAFFIC_COUNT = 16;
 for (let i = 0; i < TRAFFIC_COUNT; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const roll = Math.random();
@@ -354,7 +343,6 @@ function makePed() {
     new MeshStandardMaterial({ color: shirtCol })
   );
   body.position.y = 1.1;
-  body.castShadow = true;
   g.add(body);
 
   const legMat = new MeshStandardMaterial({ color: pantsCol });
@@ -363,14 +351,12 @@ function makePed() {
     legMat
   );
   leftLeg.position.set(-0.13, 0.38, 0);
-  leftLeg.castShadow = true;
   g.add(leftLeg);
   const rightLeg = new Mesh(
     new BoxGeometry(0.2, 0.72, 0.24),
     legMat
   );
   rightLeg.position.set(0.13, 0.38, 0);
-  rightLeg.castShadow = true;
   g.add(rightLeg);
 
   const armMat = new MeshStandardMaterial({ color: shirtCol });
@@ -379,14 +365,12 @@ function makePed() {
     armMat
   );
   leftArm.position.set(-0.31, 1.08, 0);
-  leftArm.castShadow = true;
   g.add(leftArm);
   const rightArm = new Mesh(
     new BoxGeometry(0.16, 0.72, 0.2),
     armMat
   );
   rightArm.position.set(0.31, 1.08, 0);
-  rightArm.castShadow = true;
   g.add(rightArm);
 
   const legs = new Object3D();
@@ -409,13 +393,12 @@ function makePed() {
     new MeshStandardMaterial({ color: skinCol })
   );
   head.position.y = 1.65;
-  head.castShadow = true;
   g.add(head);
 
   return { group: g, body, head, legs, leftLeg, rightLeg, arms, leftArm, rightArm, hitFlash };
 }
 const peds = [];
-const PED_COUNT = 34;
+const PED_COUNT = 24;
 for (let i = 0; i < PED_COUNT; i++) {
   const p = makePed();
   // Place on a random sidewalk
@@ -451,17 +434,17 @@ const player = (() => {
     new BoxGeometry(0.55, 0.75, 0.32),
     new MeshStandardMaterial({ color: 0xffd200 })
   );
-  body.position.y = 1.15; body.castShadow = true; g.add(body);
+  body.position.y = 1.15; g.add(body);
   const legMat = new MeshStandardMaterial({ color: 0x1a1a22 });
   const leftLeg = new Mesh(new BoxGeometry(0.22, 0.76, 0.28), legMat);
-  leftLeg.position.set(-0.14, 0.4, 0); leftLeg.castShadow = true; g.add(leftLeg);
+  leftLeg.position.set(-0.14, 0.4, 0); g.add(leftLeg);
   const rightLeg = new Mesh(new BoxGeometry(0.22, 0.76, 0.28), legMat);
-  rightLeg.position.set(0.14, 0.4, 0); rightLeg.castShadow = true; g.add(rightLeg);
+  rightLeg.position.set(0.14, 0.4, 0); g.add(rightLeg);
   const armMat = new MeshStandardMaterial({ color: 0xffd200 });
   const leftArm = new Mesh(new BoxGeometry(0.17, 0.76, 0.22), armMat);
-  leftArm.position.set(-0.34, 1.15, 0); leftArm.castShadow = true; g.add(leftArm);
+  leftArm.position.set(-0.34, 1.15, 0); g.add(leftArm);
   const rightArm = new Mesh(new BoxGeometry(0.17, 0.76, 0.22), armMat);
-  rightArm.position.set(0.34, 1.15, 0); rightArm.castShadow = true; g.add(rightArm);
+  rightArm.position.set(0.34, 1.15, 0); g.add(rightArm);
   const legs = new Object3D();
   legs.add(leftLeg, rightLeg);
   g.add(legs);
@@ -472,7 +455,7 @@ const player = (() => {
     new BoxGeometry(0.34, 0.34, 0.34),
     new MeshStandardMaterial({ color: 0xf0c090 })
   );
-  head.position.y = 1.7; head.castShadow = true; g.add(head);
+  head.position.y = 1.7; g.add(head);
   // Cap accent
   const cap = new Mesh(
     new BoxGeometry(0.36, 0.12, 0.36),
