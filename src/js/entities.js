@@ -370,6 +370,9 @@ const player = (() => {
     onGround: true,
     walkPhase: 0,
     actionTimer: 0,
+    knockTimer: 0,
+    knockVx: 0,
+    knockVz: 0,
     heldType: 'empty',
   };
 })();

@@ -733,6 +733,26 @@ function spawnImpactDust(x, z) {
   activeEffects.push({ group: dust, ttl: 0.32, maxTtl: 0.32, kind: 'dust' });
 }
 
+function spawnSparkBurst(x, y, z, intensity = 1) {
+  const sparks = new Group();
+  const count = Math.min(16, Math.max(6, Math.floor(8 * intensity)));
+  for (let i = 0; i < count; i++) {
+    const spark = new Mesh(
+      new BoxGeometry(0.035, 0.035, 0.38 + Math.random() * 0.34),
+      new MeshBasicMaterial({ color: Math.random() < 0.35 ? 0xfff4d8 : 0xff8a00, transparent: true, opacity: 0.95 })
+    );
+    spark.position.set((Math.random() - 0.5) * 0.45, (Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.45);
+    spark.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    spark.userData.vx = (Math.random() - 0.5) * 5.5 * intensity;
+    spark.userData.vy = (1.2 + Math.random() * 4.2) * intensity;
+    spark.userData.vz = (Math.random() - 0.5) * 5.5 * intensity;
+    sparks.add(spark);
+  }
+  sparks.position.set(x, y, z);
+  scene.add(sparks);
+  activeEffects.push({ group: sparks, ttl: 0.42, maxTtl: 0.42, kind: 'sparks' });
+}
+
 function throwHeldObject() {
   const forward = worldForwardFromYaw(player.yaw);
   const mesh = new Mesh(
@@ -776,8 +796,16 @@ function updateCombatEffects(dt) {
     const fx = activeEffects[i];
     fx.ttl -= dt;
     const alpha = Math.max(0, fx.ttl / fx.maxTtl);
-    fx.group.scale.setScalar(0.7 + (1 - alpha) * 1.4);
+    if (fx.kind !== 'sparks') fx.group.scale.setScalar(0.7 + (1 - alpha) * 1.4);
     fx.group.traverse(obj => {
+      if (fx.kind === 'sparks' && obj.isMesh) {
+        obj.position.x += (obj.userData.vx || 0) * dt;
+        obj.position.y += (obj.userData.vy || 0) * dt;
+        obj.position.z += (obj.userData.vz || 0) * dt;
+        obj.userData.vy = (obj.userData.vy || 0) - 12 * dt;
+        obj.rotation.x += dt * 18;
+        obj.rotation.y += dt * 12;
+      }
       if (obj.material && obj.material.transparent) {
         if (typeof obj.userData.baseOpacity !== 'number') obj.userData.baseOpacity = obj.material.opacity;
         obj.material.opacity = obj.userData.baseOpacity * alpha;
@@ -853,6 +881,18 @@ function damagePed(ped, amount, knockX, knockZ) {
   }
 }
 
+function knockPlayerByVehicle(knockX, knockZ, power = 1) {
+  if (inVehicle || activeLocation) return;
+  player.knockTimer = 0.75;
+  player.knockVx = knockX * power;
+  player.knockVz = knockZ * power;
+  player.velocityY = Math.max(player.velocityY, 4.8 + power * 1.6);
+  player.onGround = false;
+  player.actionTimer = 0.34;
+  player.group.rotation.z = Math.sign(knockX || 1) * 0.65;
+  triggerLocationAlert('WANTED');
+}
+
 function hitNearbyPed() {
   const power = player.heldType === 'object' ? 32 : 24;
   const knock = player.heldType === 'object' ? 0.7 : 0.55;
@@ -867,7 +907,7 @@ function updatePlayerActionPose(moving, sprint, dt) {
 
   player.body.rotation.x = 0;
   player.head.rotation.x = 0;
-  player.group.rotation.z = 0;
+  if (player.knockTimer <= 0) player.group.rotation.z = 0;
   player.leftLeg.rotation.x = moving && player.onGround ? stride * runScale : 0;
   player.rightLeg.rotation.x = moving && player.onGround ? -stride * runScale : 0;
   player.leftArm.rotation.x = moving ? -stride * runScale * 0.75 : 0.12;
@@ -938,7 +978,7 @@ function updatePlayer(dt) {
   if (keys['KeyS']) mz -= 1;
   if (keys['KeyA']) mx += 1;
   if (keys['KeyD']) mx -= 1;
-  const moving = mx !== 0 || mz !== 0;
+  let moving = mx !== 0 || mz !== 0;
   if (moving) {
     const len = Math.hypot(mx, mz);
     mx /= len; mz /= len;
@@ -953,6 +993,18 @@ function updatePlayer(dt) {
     if (!tryBankVaultInteraction()) performPlayerAttack();
   }
   ePressedLast = !!keys['KeyE'];
+
+  if (player.knockTimer > 0) {
+    player.knockTimer -= dt;
+    player.group.position.x += player.knockVx * dt;
+    player.group.position.z += player.knockVz * dt;
+    player.knockVx *= Math.max(0, 1 - dt * 3.2);
+    player.knockVz *= Math.max(0, 1 - dt * 3.2);
+    player.group.rotation.z *= Math.max(0, 1 - dt * 2.5);
+    mx = 0;
+    mz = 0;
+    moving = false;
+  }
 
   // Rotate intent by camera yaw
   const cosY = Math.cos(camYaw.v), sinY = Math.sin(camYaw.v);
