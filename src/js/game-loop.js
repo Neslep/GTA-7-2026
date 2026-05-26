@@ -3,21 +3,9 @@ const clock = new THREE.Clock();
 
 function updateAITraffic(dt) {
   for (const c of aiCars) {
-    if (c.ignorePlayerTimer > 0) c.ignorePlayerTimer -= dt;
-
-    const playerBlocking = !inVehicle && isPlayerBlockingTraffic(c);
-    if (playerBlocking && c.ignorePlayerTimer <= 0) {
-      if (!c.yieldTimer) c.yieldTimer = 2.4;
-      c.yieldTimer -= dt;
-      if (c.yieldTimer <= 0) {
-        c.yieldTimer = 0;
-        c.ignorePlayerTimer = 2.8;
-      }
-    } else if (!playerBlocking) {
-      c.yieldTimer = 0;
-    }
-
-    const moveSpeed = c.yieldTimer > 0 ? 0 : c.speed;
+    const blocked = isCharacterBlockingTraffic(c);
+    c.brakeBlend = MathUtils.clamp((c.brakeBlend || 0) + (blocked ? dt * 8 : -dt * 4), 0, 1);
+    const moveSpeed = c.speed * (1 - c.brakeBlend);
     if (c.horizontal) {
       c.group.position.x += c.direction * -1 * moveSpeed * dt; // -direction matches initial rotation
       // wrap
@@ -32,16 +20,23 @@ function updateAITraffic(dt) {
   }
 }
 
-function isPlayerBlockingTraffic(car) {
-  const px = player.group.position.x;
-  const pz = player.group.position.z;
+function isPointBlockingTraffic(car, px, pz, lookAhead = 13, laneWidth = 3.1) {
   if (car.horizontal) {
     const moveDir = car.direction * -1;
     const ahead = (px - car.group.position.x) * moveDir;
-    return ahead > 0 && ahead < 11 && Math.abs(pz - car.group.position.z) < 2.6;
+    return ahead > 0 && ahead < lookAhead && Math.abs(pz - car.group.position.z) < laneWidth;
   }
   const ahead = (pz - car.group.position.z) * car.direction;
-  return ahead > 0 && ahead < 11 && Math.abs(px - car.group.position.x) < 2.6;
+  return ahead > 0 && ahead < lookAhead && Math.abs(px - car.group.position.x) < laneWidth;
+}
+
+function isCharacterBlockingTraffic(car) {
+  if (!inVehicle && !hijackState && isPointBlockingTraffic(car, player.group.position.x, player.group.position.z)) return true;
+  for (const ped of peds) {
+    if (ped.downTimer > 0) continue;
+    if (isPointBlockingTraffic(car, ped.group.position.x, ped.group.position.z, 10, 2.7)) return true;
+  }
+  return false;
 }
 
 function updatePeds(dt) {
@@ -162,6 +157,7 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
+  if (hijackState) return;
   if (nearestServiceLocation && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
@@ -193,16 +189,23 @@ function tryEnterExit() {
     v.group.rotation.z = 0;
     document.getElementById('mode').textContent = wantedLevel > 0 ? 'WANTED' : 'ON FOOT';
     document.getElementById('speedo').classList.remove('show');
-  } else if (nearestVehicle || nearestTrafficVehicle) {
-    inVehicle = nearestVehicle || hijackTrafficVehicle(nearestTrafficVehicle);
-    inVehicle.occupied = true;
-    player.group.visible = inVehicle.kind === 'bike';
-    player.heldItem.visible = inVehicle.kind !== 'bike';
-    document.getElementById('mode').textContent = inVehicle.kind === 'bike' ? 'RIDING' : 'DRIVING';
-    document.getElementById('speedo').classList.add('show');
-    // Reset cam yaw relative to vehicle
-    camYaw.v = 0;
+  } else if (nearestTrafficVehicle) {
+    startHijackTrafficVehicle(nearestTrafficVehicle);
+  } else if (nearestVehicle) {
+    enterVehicleNow(nearestVehicle);
   }
+}
+
+function enterVehicleNow(vehicle) {
+  inVehicle = vehicle;
+  inVehicle.occupied = true;
+  inVehicle.isHijacking = false;
+  if (inVehicle.leftDoor) inVehicle.leftDoor.rotation.y = 0;
+  player.group.visible = inVehicle.kind === 'bike';
+  player.heldItem.visible = inVehicle.kind !== 'bike';
+  document.getElementById('mode').textContent = inVehicle.kind === 'bike' ? 'RIDING' : 'DRIVING';
+  document.getElementById('speedo').classList.add('show');
+  camYaw.v = 0;
 }
 
 function findNearestVehicle() {
@@ -220,6 +223,7 @@ function findNearestVehicle() {
 function findNearestTrafficVehicle() {
   let nearest = null, best = 4.8;
   for (const v of aiCars) {
+    if (v.isHijacking) continue;
     const dx = v.group.position.x - player.group.position.x;
     const dz = v.group.position.z - player.group.position.z;
     const d = Math.hypot(dx, dz);
@@ -240,6 +244,81 @@ function hijackTrafficVehicle(car) {
   nearestTrafficVehicle = null;
   nearestVehicle = car;
   return car;
+}
+
+function vehicleLocalPoint(vehicle, x, y, z) {
+  return vehicle.group.localToWorld(new Vector3(x, y, z));
+}
+
+function startHijackTrafficVehicle(car) {
+  const hijacked = hijackTrafficVehicle(car);
+  hijacked.isHijacking = true;
+  hijacked.occupied = true;
+  hijacked.velocity = 0;
+  hijacked.speed = 0;
+  if (hijacked.leftDoor) hijacked.leftDoor.rotation.y = 0;
+
+  const driver = makePed();
+  const start = vehicleLocalPoint(hijacked, -0.35, 0, -0.15);
+  driver.group.position.set(start.x, 0, start.z);
+  driver.group.rotation.y = hijacked.group.rotation.y + Math.PI / 2;
+  scene.add(driver.group);
+
+  const playerPos = vehicleLocalPoint(hijacked, -2.35, 0, 0.15);
+  player.group.position.set(playerPos.x, 0, playerPos.z);
+  player.yaw = hijacked.group.rotation.y - Math.PI / 2;
+  player.group.rotation.y = player.yaw;
+  hijackState = {
+    car: hijacked,
+    driver,
+    t: 0,
+    duration: 1.25,
+  };
+  setWantedLevel(Math.max(wantedLevel, 1));
+  player.heldItem.visible = true;
+  document.getElementById('mode').textContent = 'HIJACKING';
+}
+
+function updateHijackSequence(dt) {
+  if (!hijackState) return;
+  const h = hijackState;
+  h.t += dt;
+  const p = Math.min(1, h.t / h.duration);
+  if (h.car.leftDoor) h.car.leftDoor.rotation.y = -Math.sin(Math.min(1, p * 1.8) * Math.PI / 2) * 1.25;
+
+  const doorPos = vehicleLocalPoint(h.car, -1.55, 0, 0.08);
+  const tossPos = vehicleLocalPoint(h.car, -3.5, 0, -0.55);
+  const lift = Math.sin(Math.min(1, p) * Math.PI) * 0.45;
+  h.driver.group.position.set(
+    doorPos.x + (tossPos.x - doorPos.x) * p,
+    lift,
+    doorPos.z + (tossPos.z - doorPos.z) * p
+  );
+  h.driver.group.rotation.y = h.car.group.rotation.y + Math.PI / 2 + p * 0.8;
+  h.driver.group.rotation.z = p > 0.55 ? Math.PI / 2 : p * 0.9;
+
+  const playerPos = vehicleLocalPoint(h.car, -2.1 + p * 0.55, 0, 0.22);
+  player.group.position.set(playerPos.x, 0, playerPos.z);
+  player.rightArm.rotation.x = -1.2;
+  player.leftArm.rotation.x = -0.65;
+
+  if (p >= 1) {
+    h.driver.group.position.y = 0;
+    peds.push({
+      ...h.driver,
+      dir: h.car.group.rotation.y + Math.PI / 2,
+      speed: 1.0,
+      walkPhase: 0,
+      turnTimer: 2.5,
+      health: 100,
+      hitTimer: 0,
+      downTimer: 2.4,
+    });
+    if (h.car.leftDoor) h.car.leftDoor.rotation.y = 0;
+    const car = h.car;
+    hijackState = null;
+    enterVehicleNow(car);
+  }
 }
 
 // -------------------- MINIMAP --------------------
@@ -381,7 +460,14 @@ function loop() {
   const dt = Math.min(0.05, clock.getDelta());
   frame++;
 
-  if (inVehicle) {
+  if (hijackState) {
+    updateHijackSequence(dt);
+    nearestVehicle = null;
+    nearestTrafficVehicle = null;
+    nearestLocation = null;
+    nearestMissionStart = null;
+    nearestServiceLocation = null;
+  } else if (inVehicle) {
     updateVehicle(dt, inVehicle);
     nearestServiceLocation = findNearestServiceLocation();
     nearestMissionStart = null;
@@ -395,6 +481,7 @@ function loop() {
   }
   updateAITraffic(dt);
   updatePeds(dt);
+  updateCombatEffects(dt);
   updateCitySceneActors(dt);
   updateLocationAlert(dt);
   updateLocationEffects(dt);

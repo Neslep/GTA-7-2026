@@ -17,6 +17,16 @@ function makeCar(color = 0xff3030) {
   cabin.position.set(0, 1.4, -0.2);
   cabin.castShadow = true;
   g.add(cabin);
+  const leftDoor = new Group();
+  leftDoor.position.set(-1.04, 0.95, 0.62);
+  const doorPanel = new Mesh(
+    new BoxGeometry(0.08, 0.62, 1.28),
+    new MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.5 })
+  );
+  doorPanel.position.set(0, 0, -0.55);
+  doorPanel.castShadow = true;
+  leftDoor.add(doorPanel);
+  g.add(leftDoor);
   // Windshield reflection strip
   const ws = new Mesh(
     new BoxGeometry(1.7, 0.5, 0.1),
@@ -55,7 +65,7 @@ function makeCar(color = 0xff3030) {
     tl.position.set(x, 0.95, -2.1);
     g.add(tl);
   }
-  return { group: g, wheels, body, color };
+  return { group: g, wheels, body, leftDoor, color };
 }
 
 function makeMotorbike(color = 0xff7030) {
