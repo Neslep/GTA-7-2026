@@ -182,6 +182,7 @@ function makeTree(x, z) {
 }
 
 // -------------------- STREET LAMPS --------------------
+const cityStreetLamps = [];
 for (let i = 0; i <= GRID; i++) {
   for (let j = 0; j < GRID; j++) {
     if (Math.random() < 0.7) {
@@ -219,11 +220,13 @@ function makeLamp(x, z) {
   g.position.set(x, 0, z);
   g.rotation.y = Math.random() * Math.PI * 2;
   scene.add(g);
+  cityStreetLamps.push({ group: g, bulb });
 }
 
 // -------------------- CITY LOCATIONS / AMBIENT SCENES --------------------
 const cityLocations = [];
 const citySceneActors = [];
+const cityBillboards = [];
 const reservedAreas = [];
 const placedProps = [];
 
@@ -414,6 +417,7 @@ function makeBillboard(x, z, text, color = '#00c3ff') {
   g.add(pole, board);
   g.position.set(x, 0, z);
   scene.add(g);
+  cityBillboards.push(board);
   placedProps.push({ x, z, radius: 3.2 });
 }
 

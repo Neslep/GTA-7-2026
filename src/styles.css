@@ -17,11 +17,40 @@
     background-image:
       repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 4px);
     pointer-events: none;
+    animation: scanlineDrift 6s linear infinite;
+  }
+  #intro::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(180deg, transparent 0 48%, rgba(255, 210, 0, 0.08) 50%, transparent 52% 100%);
+    background-size: 100% 24px;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    opacity: 0.35;
+    animation: scanlineDrift 1.8s linear infinite;
   }
   .intro-tag { font-family: 'IBM Plex Mono'; font-size: 12px; letter-spacing: 8px; color: #ff5900; opacity: 0.8; margin-bottom: 16px; }
-  .intro-title { font-family: 'Bebas Neue'; font-size: clamp(80px, 14vw, 200px); line-height: 0.9; letter-spacing: 2px; color: #fff; text-shadow: 0 0 30px rgba(255, 89, 0, 0.4); }
+  .intro-title { font-family: 'Bebas Neue'; font-size: clamp(80px, 14vw, 200px); line-height: 0.9; letter-spacing: 2px; color: #fff; text-shadow: 0 0 30px rgba(255, 89, 0, 0.4); animation: neonTitleFlicker 3.6s ease-in-out infinite; }
   .intro-title span { color: #ff5900; }
-  .intro-sub { font-size: 13px; opacity: 0.6; letter-spacing: 3px; margin-top: 8px; margin-bottom: 48px; }
+  .intro-sub { font-size: 13px; opacity: 0.6; letter-spacing: 3px; margin-top: 8px; margin-bottom: 24px; }
+  .intro-stats {
+    display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+    margin-bottom: 34px;
+    font-size: 10px; font-weight: 700; letter-spacing: 2px;
+    color: rgba(255,255,255,0.74);
+  }
+  .intro-stats span {
+    border: 1px solid rgba(255, 210, 0, 0.28);
+    background: rgba(10,10,18,0.34);
+    padding: 7px 10px;
+    clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  }
+  @keyframes scanlineDrift { from { background-position-y: 0; } to { background-position-y: 96px; } }
+  @keyframes neonTitleFlicker {
+    0%, 100% { filter: brightness(1); text-shadow: 0 0 30px rgba(255, 89, 0, 0.4); }
+    48% { filter: brightness(1.18); text-shadow: 0 0 16px rgba(255, 210, 0, 0.42), 0 0 46px rgba(255, 89, 0, 0.45); }
+    51% { filter: brightness(0.78); }
+    53% { filter: brightness(1.24); }
+  }
   #playBtn {
     background: #ffd200; color: #0a0a12; border: none; padding: 18px 56px;
     font-family: 'Bebas Neue'; font-size: 28px; letter-spacing: 4px; cursor: pointer;
@@ -42,6 +71,16 @@
   /* ---------- HUD ---------- */
   #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; display: none; }
   #hud.active { display: block; }
+  #hud.alert-state .status-pill,
+  #hud.alert-state #minimap-wrap,
+  #hud.alert-state #objectivePanel {
+    animation: sirenPulse 0.82s ease-in-out infinite;
+  }
+  #hud.alert-state .topbar .dot { background: #ff3030; }
+  @keyframes sirenPulse {
+    0%, 100% { border-color: rgba(255, 89, 0, 0.42); box-shadow: 0 0 0 rgba(255, 89, 0, 0); }
+    50% { border-color: rgba(255, 210, 0, 0.9); box-shadow: 0 0 22px rgba(255, 89, 0, 0.28); }
+  }
 
   /* Top bar */
   .topbar {
@@ -78,7 +117,7 @@
     transition: opacity 0.18s ease, border-color 0.18s ease, color 0.18s ease;
     clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
   }
-  #locationBadge.show { opacity: 1; }
+  #locationBadge.show { opacity: 1; animation: hudPop 0.22s ease-out; }
   #locationBadge.alert {
     color: #ffd200;
     border-color: rgba(255, 89, 0, 0.8);
@@ -97,7 +136,8 @@
     transition: opacity 0.18s ease, border-color 0.18s ease;
     clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
   }
-  #objectivePanel.show { opacity: 1; }
+  #objectivePanel.show { opacity: 1; animation: hudSlideIn 0.24s ease-out; }
+  #objectivePanel.flash { animation: objectiveFlash 0.42s ease-out; }
   #objectivePanel.alert {
     border-color: rgba(255, 89, 0, 0.74);
     border-left-color: #ff5900;
@@ -125,6 +165,19 @@
     letter-spacing: 2px;
     color: #00c3ff;
   }
+  @keyframes hudPop {
+    from { transform: translateX(-50%) translateY(-6px) scale(0.98); }
+    to { transform: translateX(-50%) translateY(0) scale(1); }
+  }
+  @keyframes hudSlideIn {
+    from { transform: translateX(-50%) translateY(-8px); filter: brightness(1.35); }
+    to { transform: translateX(-50%) translateY(0); filter: brightness(1); }
+  }
+  @keyframes objectiveFlash {
+    0% { filter: brightness(2); transform: translateX(-50%) skewX(-3deg); }
+    35% { filter: brightness(1.45); transform: translateX(-50%) skewX(2deg); }
+    100% { filter: brightness(1); transform: translateX(-50%) skewX(0); }
+  }
 
   /* Speedometer (driving) */
   #speedo {
@@ -140,6 +193,25 @@
   #speedo .num { font-family: 'Bebas Neue'; font-size: 64px; line-height: 1; color: #ffd200; }
   #speedo .num .unit { font-size: 18px; color: #fff; opacity: 0.6; margin-left: 6px; }
   #speedo .gear { font-size: 11px; letter-spacing: 2px; opacity: 0.7; }
+  .vehicle-health {
+    width: 100%;
+    height: 5px;
+    margin: 7px 0 6px;
+    background: rgba(255,255,255,0.1);
+    overflow: hidden;
+    clip-path: polygon(3px 0, 100% 0, calc(100% - 3px) 100%, 0 100%);
+  }
+  #vehicleHealthBar {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, #ff3030, #ffd200, #00ff88);
+    transform-origin: left center;
+    transform: scaleX(1);
+    transition: transform 0.16s ease, filter 0.16s ease;
+  }
+  #vehicleHealthBar.low { filter: saturate(1.6) brightness(1.25); animation: damagePulse 0.65s infinite; }
+  @keyframes damagePulse { 50% { opacity: 0.45; } }
 
   /* Minimap */
   #minimap-wrap {
@@ -150,6 +222,16 @@
     overflow: hidden;
     clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
   }
+  #minimap-wrap::after {
+    content: ""; position: absolute; inset: -40%;
+    background: conic-gradient(from 0deg, transparent 0 72%, rgba(255, 210, 0, 0.22), transparent 86% 100%);
+    transform-origin: center;
+    animation: radarSweep 3s linear infinite;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+  #minimap-wrap.wanted { border-color: rgba(255, 89, 0, 0.8); }
+  @keyframes radarSweep { to { transform: rotate(360deg); } }
   #minimap { display: block; width: 100%; height: 100%; }
   .map-label { position: absolute; top: 8px; left: 12px; font-size: 10px; letter-spacing: 3px; opacity: 0.6; pointer-events: none; }
 
@@ -160,14 +242,20 @@
     padding: 10px 22px; font-size: 13px; letter-spacing: 3px; font-weight: bold;
     clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
     opacity: 0; transition: opacity 0.2s;
+    max-width: 92vw;
+    overflow-wrap: break-word;
   }
-  #prompt.show { opacity: 1; }
+  #prompt.show { opacity: 1; animation: promptKick 0.18s ease-out; }
   #prompt.vehicle-mode {
     left: 50%;
     bottom: 128px;
     transform: translateX(-50%);
   }
   #prompt kbd { background: #0a0a12; color: #ffd200; padding: 2px 8px; margin-right: 8px; }
+  @keyframes promptKick {
+    from { filter: brightness(1.45); transform: translate(-50%, 50%) scale(1.03); }
+    to { filter: brightness(1); transform: translate(-50%, 50%) scale(1); }
+  }
 
   /* Crosshair */
   .crosshair {
@@ -200,7 +288,27 @@
   #vignette {
     position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.5) 100%);
+    transition: background 0.2s ease;
   }
+  #hud.danger-vignette #vignette {
+    background:
+      radial-gradient(ellipse at center, transparent 42%, rgba(255, 48, 48, 0.20) 72%, rgba(0,0,0,0.62) 100%);
+  }
+  #screenFlash {
+    position: absolute; inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    background: rgba(255,255,255,0);
+    z-index: 80;
+  }
+  #screenFlash.flash-impact { animation: screenFlashImpact 0.24s ease-out; }
+  #screenFlash.flash-alarm { animation: screenFlashAlarm 0.38s ease-out; }
+  #screenFlash.flash-success { animation: screenFlashSuccess 0.34s ease-out; }
+  #screenFlash.flash-fail { animation: screenFlashFail 0.34s ease-out; }
+  @keyframes screenFlashImpact { 0% { opacity: 0.65; background: rgba(255,255,255,0.7); } 100% { opacity: 0; background: rgba(255,255,255,0); } }
+  @keyframes screenFlashAlarm { 0% { opacity: 0.7; background: rgba(255,48,48,0.62); } 100% { opacity: 0; background: rgba(255,48,48,0); } }
+  @keyframes screenFlashSuccess { 0% { opacity: 0.58; background: rgba(0,255,136,0.48); } 100% { opacity: 0; background: rgba(0,255,136,0); } }
+  @keyframes screenFlashFail { 0% { opacity: 0.58; background: rgba(255,89,0,0.55); } 100% { opacity: 0; background: rgba(255,89,0,0); } }
 
   /* ---------- MOBILE CONTROLS ---------- */
   #mobileControls {
@@ -260,6 +368,9 @@
     transition: transform 0.08s ease-out;
   }
   .mobile-stick.active .stick-thumb { transition: none; }
+  .mobile-stick.active .stick-thumb {
+    box-shadow: 0 0 0 8px rgba(255, 210, 0, 0.12), 0 0 28px rgba(255, 89, 0, 0.45);
+  }
 
   .mobile-actions {
     position: absolute;
@@ -294,6 +405,7 @@
   .mobile-btn.ready {
     border-color: rgba(255, 210, 0, 0.95);
     color: #ffd200;
+    box-shadow: inset 0 0 24px rgba(255, 210, 0, 0.18), 0 0 18px rgba(255, 210, 0, 0.22);
   }
   .mobile-btn.pressed,
   .mobile-btn:active {

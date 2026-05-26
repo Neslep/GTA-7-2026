@@ -164,7 +164,7 @@ function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
   mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
   mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
-  mobileCarBtn.textContent = driving ? 'EXIT' : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
+  mobileCarBtn.textContent = driving ? (canUseLocation ? locationLabel : 'EXIT') : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
   mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle || canUseLocation);
 }
 
@@ -290,6 +290,7 @@ function startMission(missionDef) {
   missionReward = missionDef.reward;
   missionStatusTimer = 0;
   document.getElementById('mode').textContent = 'MISSION';
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function completeMission(text = 'MISSION COMPLETE') {
@@ -303,6 +304,8 @@ function completeMission(text = 'MISSION COMPLETE') {
   missionStatusTimer = 3.5;
   missionTarget = null;
   missionTimer = 0;
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('success');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
   if (!inVehicle && !activeLocation) document.getElementById('mode').textContent = wantedLevel > 0 ? 'WANTED' : 'ON FOOT';
 }
 
@@ -313,6 +316,8 @@ function failMission(text = 'MISSION FAILED') {
   missionStatusTimer = 3.5;
   missionTarget = null;
   missionTimer = 0;
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('fail');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function startEscapeHeatMission() {
@@ -419,6 +424,8 @@ function triggerBankAlarm() {
   missionTimer = 80;
   missionReward = 0;
   document.getElementById('mode').textContent = 'BANK ALARM';
+  if (typeof triggerScreenFlash === 'function') triggerScreenFlash('alarm');
+  if (typeof flashObjectivePanel === 'function') flashObjectivePanel();
 }
 
 function tryBankVaultInteraction() {
@@ -498,6 +505,7 @@ function damageVehicle(veh, amount) {
   ensureVehicleDamageState(veh);
   veh.health = Math.max(0, veh.health - amount);
   if (veh.smoke) veh.smoke.visible = veh.health < 45;
+  if (amount >= 10 && typeof triggerScreenFlash === 'function') triggerScreenFlash('impact');
 }
 
 function repairVehicleAtGarage(veh) {
