@@ -24,26 +24,50 @@ for (let i = 0; i <= GRID; i++) {
   h.position.set(0, 0.02, pos);
   h.receiveShadow = true;
   roadsGroup.add(h);
-  // Sidewalk strips
-  for (const dz of [-ROAD/2 - 1, ROAD/2 + 1]) {
-    const sw = new Mesh(new BoxGeometry(GRID*BLOCK + ROAD, 0.25, 1.6), sidewalkMat);
-    sw.position.set(0, 0.12, pos + dz);
-    sw.receiveShadow = true;
-    roadsGroup.add(sw);
-  }
   // Vertical road
   const v = new Mesh(new PlaneGeometry(ROAD, GRID*BLOCK + ROAD), roadMat);
   v.rotation.x = -Math.PI/2;
   v.position.set(pos, 0.02, 0);
   v.receiveShadow = true;
   roadsGroup.add(v);
-  for (const dx of [-ROAD/2 - 1, ROAD/2 + 1]) {
-    const sw = new Mesh(new BoxGeometry(1.6, 0.25, GRID*BLOCK + ROAD), sidewalkMat);
-    sw.position.set(pos + dx, 0.12, 0);
-    sw.receiveShadow = true;
-    roadsGroup.add(sw);
+}
+
+// Sidewalks are split per block so they stop before intersections instead of
+// drawing raised bars across the drivable road.
+const sidewalkSegmentLength = BLOCK - ROAD - 1.2;
+const sidewalkSegmentCount = (GRID + 1) * GRID * 2;
+const sidewalkDummy = new Object3D();
+const horizontalSidewalks = new THREE.InstancedMesh(
+  new BoxGeometry(sidewalkSegmentLength, 0.22, 1.45),
+  sidewalkMat,
+  sidewalkSegmentCount
+);
+const verticalSidewalks = new THREE.InstancedMesh(
+  new BoxGeometry(1.45, 0.22, sidewalkSegmentLength),
+  sidewalkMat,
+  sidewalkSegmentCount
+);
+horizontalSidewalks.receiveShadow = true;
+verticalSidewalks.receiveShadow = true;
+let horizontalSidewalkIndex = 0;
+let verticalSidewalkIndex = 0;
+for (let i = 0; i <= GRID; i++) {
+  const roadPos = -HALF + i * BLOCK;
+  for (let j = 0; j < GRID; j++) {
+    const blockCenter = -HALF + j * BLOCK + BLOCK / 2;
+    for (const dz of [-ROAD/2 - 1, ROAD/2 + 1]) {
+      sidewalkDummy.position.set(blockCenter, 0.11, roadPos + dz);
+      sidewalkDummy.updateMatrix();
+      horizontalSidewalks.setMatrixAt(horizontalSidewalkIndex++, sidewalkDummy.matrix);
+    }
+    for (const dx of [-ROAD/2 - 1, ROAD/2 + 1]) {
+      sidewalkDummy.position.set(roadPos + dx, 0.11, blockCenter);
+      sidewalkDummy.updateMatrix();
+      verticalSidewalks.setMatrixAt(verticalSidewalkIndex++, sidewalkDummy.matrix);
+    }
   }
 }
+roadsGroup.add(horizontalSidewalks, verticalSidewalks);
 
 // Dashed yellow center lines
 for (let i = 0; i <= GRID; i++) {
@@ -241,6 +265,8 @@ const citySceneActors = [];
 const cityBillboards = [];
 const reservedAreas = [];
 const placedProps = [];
+const parkingSlots = [];
+const parkingGateArms = [];
 
 function areaOverlaps(a, b, padding = 0) {
   return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + padding &&
@@ -467,6 +493,94 @@ function makeLocationInterior(loc, index) {
   const z = 246;
   loc.insidePos = new Vector3(x, 0, z);
   loc.exitPos = new Vector3(x, 0, z + 7);
+  loc.interiorColliders = [];
+  loc.interactables = [];
+  const addInteriorCollider = (cx, cz, w, d) => {
+    loc.interiorColliders.push({ x: cx, z: cz, w: w / 2, d: d / 2 });
+  };
+  const addInteriorInteractable = (mesh, type, label, radius = 2.2, extra = {}) => {
+    const pos = new Vector3();
+    mesh.getWorldPosition(pos);
+    loc.interactables.push({ mesh, type, label, radius, x: pos.x, z: pos.z, cooldown: 0, ...extra });
+  };
+  const addSmallCrate = (px, pz, color = 0x7a5a32) => {
+    const crate = new Mesh(
+      new BoxGeometry(0.9, 0.7, 0.9),
+      new MeshStandardMaterial({ color, roughness: 0.82 })
+    );
+    crate.position.set(px, 0.36, pz);
+    crate.castShadow = true;
+    scene.add(crate);
+    addInteriorInteractable(crate, 'pickup', 'PICK UP OBJECT', 2.1);
+    return crate;
+  };
+  const addVendingMachine = (px, pz, yaw = 0) => {
+    const g = new Group();
+    const body = new Mesh(new BoxGeometry(1.35, 2.45, 0.75), new MeshStandardMaterial({ color: 0x153c4a, roughness: 0.42, metalness: 0.18 }));
+    body.position.y = 1.22;
+    const glass = new Mesh(new BoxGeometry(0.82, 1.18, 0.06), new MeshStandardMaterial({ color: 0x88c8ff, emissive: 0x00c3ff, emissiveIntensity: 0.32 }));
+    glass.position.set(-0.16, 1.46, 0.41);
+    const buttonPanel = new Mesh(new BoxGeometry(0.25, 0.9, 0.08), new MeshBasicMaterial({ color: 0xffd200 }));
+    buttonPanel.position.set(0.48, 1.34, 0.43);
+    g.add(body, glass, buttonPanel);
+    g.position.set(px, 0, pz);
+    g.rotation.y = yaw;
+    scene.add(g);
+    addInteriorCollider(px, pz, 1.35, 0.75);
+    addInteriorInteractable(g, 'vending', 'BUY SNACK', 2.4);
+    return g;
+  };
+  const addArcadeCabinet = (px, pz, yaw = 0, color = 0xff00cc) => {
+    const g = new Group();
+    const body = new Mesh(new BoxGeometry(1.0, 1.85, 0.82), new MeshStandardMaterial({ color: 0x161620, roughness: 0.56 }));
+    body.position.y = 0.92;
+    const screen = new Mesh(new BoxGeometry(0.7, 0.5, 0.05), new MeshBasicMaterial({ color }));
+    screen.position.set(0, 1.28, 0.44);
+    const controls = new Mesh(new BoxGeometry(0.75, 0.16, 0.38), new MeshStandardMaterial({ color: 0x303040, roughness: 0.45 }));
+    controls.position.set(0, 0.78, 0.38);
+    g.add(body, screen, controls);
+    g.position.set(px, 0, pz);
+    g.rotation.y = yaw;
+    scene.add(g);
+    addInteriorCollider(px, pz, 1.0, 0.82);
+    addInteriorInteractable(g, 'arcade', 'PLAY ARCADE', 2.4);
+    return g;
+  };
+  const addJukebox = (px, pz, yaw = 0) => {
+    const g = new Group();
+    const base = new Mesh(new BoxGeometry(1.25, 1.55, 0.72), new MeshStandardMaterial({ color: 0x421018, roughness: 0.38, metalness: 0.16 }));
+    base.position.y = 0.78;
+    const dome = new Mesh(new SphereGeometry(0.58, 16, 8), new MeshBasicMaterial({ color: 0xff5900 }));
+    dome.position.set(0, 1.55, 0.04);
+    dome.scale.y = 0.55;
+    const grill = new Mesh(new BoxGeometry(0.76, 0.5, 0.06), new MeshBasicMaterial({ color: 0xffd200 }));
+    grill.position.set(0, 0.75, 0.39);
+    g.add(base, dome, grill);
+    g.position.set(px, 0, pz);
+    g.rotation.y = yaw;
+    scene.add(g);
+    addInteriorCollider(px, pz, 1.25, 0.72);
+    addInteriorInteractable(g, 'jukebox', 'START MUSIC', 2.6);
+    return g;
+  };
+  const addToolBench = (px, pz, yaw = 0) => {
+    const g = new Group();
+    const bench = new Mesh(new BoxGeometry(3.6, 0.8, 1.15), new MeshStandardMaterial({ color: 0x5a4430, roughness: 0.72 }));
+    bench.position.y = 0.4;
+    const toolA = new Mesh(new BoxGeometry(0.55, 0.08, 0.18), new MeshBasicMaterial({ color: 0xd8d8d8 }));
+    toolA.position.set(-0.85, 0.86, 0.1);
+    toolA.rotation.y = 0.45;
+    const toolB = new Mesh(new CylinderGeometry(0.08, 0.08, 0.75, 8), new MeshBasicMaterial({ color: 0xff3030 }));
+    toolB.position.set(0.65, 0.93, -0.08);
+    toolB.rotation.z = Math.PI / 2;
+    g.add(bench, toolA, toolB);
+    g.position.set(px, 0, pz);
+    g.rotation.y = yaw;
+    scene.add(g);
+    addInteriorCollider(px, pz, 3.6, 1.15);
+    addInteriorInteractable(g, 'tools', 'GRAB TOOL BOX', 2.7);
+    return g;
+  };
 
   const floor = new Mesh(
     new PlaneGeometry(34, 28),
@@ -478,12 +592,20 @@ function makeLocationInterior(loc, index) {
   scene.add(floor);
 
   const wallMat = new MeshStandardMaterial({ color: loc.wallColor || 0x181820, roughness: 0.65 });
-  for (const [wx, wz, ww, wd] of [[0, -14, 34, 0.5], [0, 14, 34, 0.5], [-17, 0, 0.5, 28], [17, 0, 0.5, 28]]) {
+  const wallSpecs = [
+    [0, -14, 34, 0.5],
+    [-10.75, 14, 12.5, 0.5],
+    [10.75, 14, 12.5, 0.5],
+    [-17, 0, 0.5, 28],
+    [17, 0, 0.5, 28],
+  ];
+  for (const [wx, wz, ww, wd] of wallSpecs) {
     const wall = new Mesh(new BoxGeometry(ww, 4.4, wd), wallMat);
     wall.position.set(x + wx, 2.2, z + wz);
     wall.castShadow = true;
     wall.receiveShadow = true;
     scene.add(wall);
+    addInteriorCollider(x + wx, z + wz, ww, wd);
   }
 
   const exitSign = makeSign('EXIT', '#ffd200', '#00c3ff', 4, 1.2);
@@ -498,8 +620,19 @@ function makeLocationInterior(loc, index) {
     );
     bar.position.set(x, 0.58, z + 8);
     scene.add(bar);
+    addInteriorCollider(x, z + 8, 13, 2);
     const bartender = makeSceneActor(x, z + 6.4, 0xffd200, 'idle');
     bartender.rotation.y = Math.PI;
+
+    for (let i = 0; i < 7; i++) {
+      const bottle = new Mesh(
+        new CylinderGeometry(0.08, 0.1, 0.48, 8),
+        new MeshStandardMaterial({ color: i % 2 ? 0x10b070 : 0xff7030, roughness: 0.35, metalness: 0.15 })
+      );
+      bottle.position.set(x - 5.4 + i * 1.8, 1.3, z + 7.05);
+      bottle.castShadow = true;
+      scene.add(bottle);
+    }
 
     const stage = new Mesh(
       new CylinderGeometry(5, 5, 0.22, 24),
@@ -512,44 +645,303 @@ function makeLocationInterior(loc, index) {
       makeNeonLight(x - 7, 3.5, z - 4, 0xff00cc, 2.4, 22),
       makeNeonLight(x + 7, 3.5, z - 4, 0x00c3ff, 2.4, 22),
     ];
+    addJukebox(x - 13.4, z + 8.8, Math.PI / 2);
+    addArcadeCabinet(x + 12.6, z + 8.6, -Math.PI / 2, 0x00c3ff);
+    addArcadeCabinet(x + 10.9, z + 8.6, -Math.PI / 2, 0xff00cc);
+    for (const [tx, tz] of [[x - 10, z + 2.5], [x + 10, z + 2.6], [x - 10.5, z - 6.2], [x + 10.5, z - 6.3]]) {
+      const table = new Mesh(new CylinderGeometry(1.05, 1.05, 0.18, 18), new MeshStandardMaterial({ color: 0x2b2028, roughness: 0.62 }));
+      table.position.set(tx, 0.78, tz);
+      table.castShadow = true;
+      scene.add(table);
+      addInteriorCollider(tx, tz, 2.1, 2.1);
+      for (let s = 0; s < 3; s++) {
+        const a = s * Math.PI * 2 / 3;
+        const stool = new Mesh(new CylinderGeometry(0.32, 0.36, 0.52, 10), new MeshStandardMaterial({ color: 0x4a2028, roughness: 0.58 }));
+        stool.position.set(tx + Math.cos(a) * 1.55, 0.26, tz + Math.sin(a) * 1.55);
+        scene.add(stool);
+      }
+    }
     for (let i = 0; i < 6; i++) {
       makeSceneActor(x - 5 + i * 2, z - 2 + (i % 2) * 2, i % 2 ? 0x00c3ff : 0xff5900, 'dance');
     }
   } else if (loc.type === 'bank') {
-    const counter = new Mesh(new BoxGeometry(14, 1.5, 1.2), new MeshStandardMaterial({ color: 0xa88c58, roughness: 0.55 }));
-    counter.position.set(x, 0.75, z - 5);
+    const woodMat = new MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.58, metalness: 0.08 });
+    const marbleMat = new MeshStandardMaterial({ color: 0xd8d2c2, roughness: 0.42, metalness: 0.08 });
+    const glassMat = new MeshStandardMaterial({ color: 0x9ed8ff, transparent: true, opacity: 0.36, roughness: 0.12, metalness: 0.05 });
+    const brassMat = new MeshStandardMaterial({ color: 0xc8a34a, roughness: 0.34, metalness: 0.65 });
+    const darkMat = new MeshStandardMaterial({ color: 0x171820, roughness: 0.62 });
+    const carpetMat = new MeshStandardMaterial({ color: 0x24364a, roughness: 0.86 });
+    const paperMat = new MeshStandardMaterial({ color: 0xf2ead8, roughness: 0.8 });
+    const cashMat = new MeshStandardMaterial({ color: 0x82b56a, roughness: 0.72 });
+    const addBankNpc = (px, pz, color, role = 'customer', yaw = 0) => {
+      const npc = makeSceneActor(px, pz, color, role === 'guard' ? 'guard' : 'idle');
+      npc.rotation.y = yaw;
+      if (role === 'teller' || role === 'manager' || role === 'advisor') {
+        const badge = new Mesh(new BoxGeometry(0.12, 0.08, 0.025), new MeshBasicMaterial({ color: 0xffd200 }));
+        badge.position.set(0.18, 1.18, 0.18);
+        npc.add(badge);
+      }
+      if (role === 'teller') {
+        const papers = new Mesh(new BoxGeometry(0.42, 0.035, 0.28), paperMat);
+        papers.position.set(0.48, 1.03, 0.26);
+        npc.add(papers);
+      } else if (role === 'customer') {
+        const folder = new Mesh(new BoxGeometry(0.34, 0.04, 0.46), paperMat);
+        folder.position.set(-0.42, 1.0, 0.2);
+        folder.rotation.z = 0.2;
+        npc.add(folder);
+      } else if (role === 'manager') {
+        const tablet = new Mesh(new BoxGeometry(0.36, 0.04, 0.28), new MeshBasicMaterial({ color: 0x101018 }));
+        tablet.position.set(0.42, 1.05, 0.22);
+        tablet.rotation.z = -0.2;
+        npc.add(tablet);
+      }
+      return npc;
+    };
+
+    const lobbyCarpet = new Mesh(new PlaneGeometry(13, 11), carpetMat);
+    lobbyCarpet.rotation.x = -Math.PI / 2;
+    lobbyCarpet.position.set(x - 2, 0.075, z + 2.5);
+    scene.add(lobbyCarpet);
+
+    const counter = new Mesh(new BoxGeometry(15.5, 1.35, 1.25), woodMat);
+    counter.position.set(x, 0.68, z - 5.4);
     scene.add(counter);
+    addInteriorCollider(x, z - 5.4, 15.5, 1.25);
+    const counterTop = new Mesh(new BoxGeometry(16.2, 0.18, 1.55), marbleMat);
+    counterTop.position.set(x, 1.43, z - 5.4);
+    scene.add(counterTop);
+    for (let i = 0; i < 4; i++) {
+      const tx = x - 5.8 + i * 3.85;
+      const window = new Mesh(new BoxGeometry(2.2, 1.45, 0.08), glassMat);
+      window.position.set(tx, 2.18, z - 4.88);
+      scene.add(window);
+      const slot = new Mesh(new BoxGeometry(1.2, 0.08, 0.1), new MeshBasicMaterial({ color: 0x101018 }));
+      slot.position.set(tx, 1.55, z - 4.8);
+      scene.add(slot);
+      const tellerSign = makeSign(`TELLER ${i + 1}`, '#fff2a0', '#ffd200', 2.1, 0.7);
+      tellerSign.position.set(tx, 3.12, z - 4.8);
+      scene.add(tellerSign);
+      addBankNpc(tx, z - 6.8, 0x2f6fb8, 'teller', 0);
+
+      const cashStack = new Mesh(new BoxGeometry(0.58, 0.12, 0.36), cashMat);
+      cashStack.position.set(tx + 0.62, 1.62, z - 5.15);
+      scene.add(cashStack);
+      addInteriorInteractable(cashStack, 'cash', 'GRAB CASH', 2.6);
+      const deskTerminal = new Mesh(new BoxGeometry(0.56, 0.38, 0.08), new MeshStandardMaterial({ color: 0x101018, emissive: 0x2080ff, emissiveIntensity: 0.2 }));
+      deskTerminal.position.set(tx - 0.55, 1.72, z - 5.18);
+      deskTerminal.rotation.x = -0.18;
+      scene.add(deskTerminal);
+      addInteriorInteractable(deskTerminal, 'terminal', 'HACK TERMINAL', 2.4);
+    }
+
+    const queueMat = new MeshStandardMaterial({ color: 0x202028, roughness: 0.48, metalness: 0.55 });
+    for (const qx of [x - 5.6, x - 1.8, x + 2.0, x + 5.8]) {
+      for (const qz of [z - 1.9, z + 1.4]) {
+        const post = new Mesh(new CylinderGeometry(0.08, 0.1, 1.05, 10), queueMat);
+        post.position.set(qx, 0.55, qz);
+        post.castShadow = true;
+        scene.add(post);
+      }
+      const rope = new Mesh(new BoxGeometry(0.12, 0.08, 3.3), brassMat);
+      rope.position.set(qx, 0.96, z - 0.25);
+      scene.add(rope);
+      addInteriorCollider(qx, z - 0.25, 0.28, 3.3);
+    }
+    const queueCustomers = [
+      [x - 5.6, z + 2.9, 0xffc857],
+      [x - 1.8, z + 0.4, 0x80c7ff],
+      [x + 2.0, z + 2.9, 0xff8a65],
+      [x + 5.8, z + 0.4, 0xa8e070],
+      [x - 3.6, z + 5.5, 0xc8a0ff],
+    ];
+    for (const [px, pz, color] of queueCustomers) addBankNpc(px, pz, color, 'customer', Math.PI);
+
+    const serviceDesk = new Mesh(new BoxGeometry(4.6, 0.85, 2.2), woodMat);
+    serviceDesk.position.set(x - 10.5, 0.43, z + 4.7);
+    serviceDesk.rotation.y = -0.18;
+    scene.add(serviceDesk);
+    addInteriorCollider(x - 10.5, z + 4.7, 4.6, 2.2);
+    const bankerChair = new Mesh(new BoxGeometry(1.1, 1.05, 1.0), darkMat);
+    bankerChair.position.set(x - 10.4, 0.53, z + 2.9);
+    bankerChair.rotation.y = -0.18;
+    scene.add(bankerChair);
+    addInteriorCollider(x - 10.4, z + 2.9, 1.1, 1.0);
+    const monitor = new Mesh(new BoxGeometry(1.0, 0.55, 0.12), new MeshStandardMaterial({ color: 0x101018, emissive: 0x2080ff, emissiveIntensity: 0.28 }));
+    monitor.position.set(x - 10.2, 1.08, z + 4.4);
+    monitor.rotation.y = -0.18;
+    scene.add(monitor);
+    addBankNpc(x - 11.8, z + 4.0, 0x2f6fb8, 'advisor', Math.PI / 2 - 0.18);
+    addBankNpc(x - 8.1, z + 5.1, 0xffd6a0, 'customer', -Math.PI / 2);
+
+    for (let i = 0; i < 4; i++) {
+      const chair = new Mesh(new BoxGeometry(1.25, 0.9, 1.15), darkMat);
+      chair.position.set(x + 7.5 + (i % 2) * 2.0, 0.45, z + 4.5 + Math.floor(i / 2) * 2.0);
+      chair.rotation.y = Math.PI;
+      scene.add(chair);
+      addInteriorCollider(chair.position.x, chair.position.z, 1.25, 1.15);
+    }
+    addBankNpc(x + 7.4, z + 3.7, 0x9ad0f5, 'customer', 0);
+    addBankNpc(x + 9.5, z + 6.4, 0xf0c090, 'customer', Math.PI);
+
+    for (const [ax, az] of [[-14.2, 7.6], [13.8, 6.5]]) {
+      const atmBody = new Mesh(new BoxGeometry(1.35, 2.05, 0.68), new MeshStandardMaterial({ color: 0x1d2430, roughness: 0.45, metalness: 0.2 }));
+      atmBody.position.set(x + ax, 1.03, z + az);
+      scene.add(atmBody);
+      addInteriorCollider(x + ax, z + az, 1.35, 0.68);
+      const atmScreen = new Mesh(new BoxGeometry(0.82, 0.42, 0.06), new MeshStandardMaterial({ color: 0x88c8ff, emissive: 0x2080ff, emissiveIntensity: 0.6 }));
+      atmScreen.position.set(x + ax, 1.38, z + az + 0.37);
+      scene.add(atmScreen);
+      addInteriorInteractable(atmBody, 'atm', 'USE ATM', 2.5);
+    }
+    addBankNpc(x - 14.2, z + 6.45, 0x70d080, 'customer', 0);
+    addBankNpc(x + 13.8, z + 5.35, 0xffb070, 'customer', 0);
+
     const vault = new Mesh(new CylinderGeometry(2.2, 2.2, 0.45, 24), new MeshStandardMaterial({ color: 0x889098, roughness: 0.3, metalness: 0.8 }));
     vault.rotation.x = Math.PI / 2;
     vault.position.set(x + 11, 2.2, z - 13.75);
     scene.add(vault);
+    addInteriorInteractable(vault, 'vault', 'OPEN VAULT', 3.5);
+    const vaultFrame = new Mesh(new BoxGeometry(5.6, 4.8, 0.34), new MeshStandardMaterial({ color: 0x3e4650, roughness: 0.38, metalness: 0.7 }));
+    vaultFrame.position.set(x + 11, 2.4, z - 13.95);
+    scene.add(vaultFrame);
+    const vaultHandle = new Mesh(new CylinderGeometry(0.12, 0.12, 1.35, 10), brassMat);
+    vaultHandle.rotation.z = Math.PI / 2;
+    vaultHandle.position.set(x + 11, 2.2, z - 13.45);
+    scene.add(vaultHandle);
+    addInteriorCollider(x + 11, z - 13.2, 5.6, 1.0);
+
+    const depositBoxWall = new Mesh(new BoxGeometry(6.2, 2.5, 0.28), new MeshStandardMaterial({ color: 0xb0a078, roughness: 0.35, metalness: 0.55 }));
+    depositBoxWall.position.set(x - 11.8, 1.45, z - 10.8);
+    scene.add(depositBoxWall);
+    addInteriorCollider(x - 11.8, z - 10.8, 6.2, 0.28);
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 6; col++) {
+        const boxFace = new Mesh(new BoxGeometry(0.72, 0.38, 0.04), new MeshBasicMaterial({ color: 0x2a2520 }));
+        boxFace.position.set(x - 14.0 + col * 0.85, 0.65 + row * 0.48, z - 10.61);
+        scene.add(boxFace);
+      }
+    }
+
+    for (const [cx, cz, ry] of [[-15.6, -12.9, 0.7], [15.6, -12.9, -0.7], [-15.6, 12.7, 2.45], [15.6, 12.7, -2.45]]) {
+      const cam = new Group();
+      const mount = new Mesh(new BoxGeometry(0.22, 0.22, 0.55), darkMat);
+      const lens = new Mesh(new CylinderGeometry(0.16, 0.16, 0.32, 10), new MeshBasicMaterial({ color: 0x101018 }));
+      lens.rotation.x = Math.PI / 2;
+      lens.position.z = 0.35;
+      cam.add(mount, lens);
+      cam.position.set(x + cx, 3.6, z + cz);
+      cam.rotation.y = ry;
+      scene.add(cam);
+    }
+
     loc.vault = vault;
     loc.vaultPos = new Vector3(x + 11, 0, z - 11.6);
     loc.alarmLight = makeNeonLight(x, 4, z - 4, 0xff3030, 0, 24);
     loc.effectLights = [makeNeonLight(x, 4, z - 5, 0xffd200, 1.4, 18)];
-    for (let i = 0; i < 3; i++) makeSceneActor(x - 5 + i * 5, z + 2, 0x1f5fff, 'guard');
+    for (const [cx, cz] of [[x - 14.0, z - 1.2], [x + 13.7, z - 1.0], [x - 13.2, z - 6.7]]) {
+      const cart = new Group();
+      const tray = new Mesh(new BoxGeometry(1.4, 0.22, 0.9), new MeshStandardMaterial({ color: 0xc8a34a, roughness: 0.42, metalness: 0.45 }));
+      tray.position.y = 0.86;
+      const cash = new Mesh(new BoxGeometry(1.05, 0.32, 0.62), cashMat);
+      cash.position.y = 1.12;
+      cart.add(tray, cash);
+      for (const [wx, wz] of [[-0.48, -0.32], [0.48, -0.32], [-0.48, 0.32], [0.48, 0.32]]) {
+        const wheel = new Mesh(new CylinderGeometry(0.12, 0.12, 0.12, 8), darkMat);
+        wheel.position.set(wx, 0.55, wz);
+        wheel.rotation.z = Math.PI / 2;
+        cart.add(wheel);
+      }
+      cart.position.set(cx, 0, cz);
+      scene.add(cart);
+      addInteriorInteractable(cart, 'cash', 'LOOT CART', 2.4);
+    }
+    const welcome = makeSign('BANKING HALL', '#fff2a0', '#ffd200', 7.2, 1.4);
+    welcome.position.set(x, 3.25, z + 10.8);
+    welcome.rotation.y = Math.PI;
+    scene.add(welcome);
+    addBankNpc(x - 5, z + 2, 0x1f5fff, 'guard', Math.PI * 0.15);
+    addBankNpc(x, z + 2, 0x1f5fff, 'guard', -Math.PI * 0.15);
+    addBankNpc(x + 9.0, z - 10.5, 0x1f5fff, 'guard', -Math.PI / 2);
+    addBankNpc(x + 6.4, z - 8.2, 0x202028, 'manager', Math.PI / 2);
   } else if (loc.type === 'police') {
     const desk = new Mesh(new BoxGeometry(11, 1.2, 2), new MeshStandardMaterial({ color: 0x1d2d46, roughness: 0.55, metalness: 0.18 }));
-    desk.position.set(x, 0.6, z + 4.5);
+    desk.position.set(x, 0.6, z + 7.5);
     scene.add(desk);
+    addInteriorCollider(x, z + 7.5, 11, 2);
+
+    const officeMat = new MeshStandardMaterial({ color: 0x24364f, roughness: 0.58, metalness: 0.12 });
+    const chairMat = new MeshStandardMaterial({ color: 0x111820, roughness: 0.62 });
+    for (const [dx, dz, rot] of [[-9, 0.5, 0.15], [8.2, 0.2, -0.15], [-8.4, -3.6, Math.PI]]) {
+      const workDesk = new Mesh(new BoxGeometry(4.2, 0.9, 2.2), officeMat);
+      workDesk.position.set(x + dx, 0.45, z + dz);
+      workDesk.rotation.y = rot;
+      scene.add(workDesk);
+      addInteriorCollider(x + dx, z + dz, 4.2, 2.2);
+
+      const chair = new Mesh(new BoxGeometry(1.1, 1.0, 1.0), chairMat);
+      chair.position.set(x + dx, 0.5, z + dz + (rot > 1 ? 1.9 : -1.9));
+      chair.rotation.y = rot;
+      scene.add(chair);
+      addInteriorCollider(chair.position.x, chair.position.z, 1.1, 1.0);
+
+      const monitor = new Mesh(new BoxGeometry(0.9, 0.55, 0.12), new MeshStandardMaterial({ color: 0x101018, emissive: 0x2080ff, emissiveIntensity: 0.25 }));
+      monitor.position.set(x + dx, 1.15, z + dz);
+      monitor.rotation.y = rot;
+      scene.add(monitor);
+      addInteriorInteractable(monitor, 'terminal', 'CHECK COMPUTER', 2.4);
+    }
+
+    const cabinetMat = new MeshStandardMaterial({ color: 0x253141, roughness: 0.45, metalness: 0.55 });
+    const weaponCabinet = new Mesh(new BoxGeometry(4.4, 2.8, 0.55), cabinetMat);
+    weaponCabinet.position.set(x + 12.8, 1.4, z - 7.6);
+    scene.add(weaponCabinet);
+    addInteriorCollider(x + 12.8, z - 7.6, 4.4, 0.55);
+    addInteriorInteractable(weaponCabinet, 'armory', 'OPEN ARMORY', 2.8);
+    for (let i = 0; i < 3; i++) {
+      const rifle = new Mesh(new BoxGeometry(0.14, 0.14, 2.2), new MeshStandardMaterial({ color: 0x101018, roughness: 0.35, metalness: 0.6 }));
+      rifle.position.set(x + 11.6 + i * 0.8, 1.2 + i * 0.28, z - 7.25);
+      rifle.rotation.x = Math.PI / 2;
+      scene.add(rifle);
+    }
+
+    const evidenceShelf = new Mesh(new BoxGeometry(5.2, 2.2, 0.8), new MeshStandardMaterial({ color: 0x4a3a24, roughness: 0.62 }));
+    evidenceShelf.position.set(x - 13, 1.1, z - 8.8);
+    scene.add(evidenceShelf);
+    addInteriorCollider(x - 13, z - 8.8, 5.2, 0.8);
+    addInteriorInteractable(evidenceShelf, 'pickup', 'TAKE EVIDENCE BOX', 2.5);
+
+    for (let i = 0; i < 5; i++) {
+      const locker = new Mesh(new BoxGeometry(0.92, 2.2, 0.62), new MeshStandardMaterial({ color: 0x26384e, roughness: 0.5, metalness: 0.32 }));
+      locker.position.set(x - 14.2 + i * 1.05, 1.1, z + 8.6);
+      scene.add(locker);
+      addInteriorCollider(locker.position.x, locker.position.z, 0.92, 0.62);
+      if (i === 2) addInteriorInteractable(locker, 'locker', 'SEARCH LOCKER', 2.3);
+    }
+
     makeNeonLight(x, 3.2, z + 1, loc.lightColor, 1.6, 20);
-    for (let i = 0; i < 2; i++) makeSceneActor(x - 3 + i * 6, z + 2.6, 0x1f5fff, 'guard');
+    for (const [ax, az] of [[-4.5, 2.6], [3.8, 2.8], [-10.2, -1.8], [9.8, -2.4]]) {
+      makeSceneActor(x + ax, z + az, 0x1f5fff, 'guard');
+    }
 
     const barMat = new MeshStandardMaterial({ color: 0x9aa4b2, roughness: 0.34, metalness: 0.75 });
     const cellWallMat = new MeshStandardMaterial({ color: 0x334154, roughness: 0.68 });
     const cellBack = new Mesh(new BoxGeometry(12, 3.0, 0.22), cellWallMat);
     cellBack.position.set(x - 3.6, 1.5, z - 11.2);
     scene.add(cellBack);
+    addInteriorCollider(x - 3.6, z - 11.2, 12, 0.22);
     for (const cx of [x - 9.6, x + 2.4]) {
       const side = new Mesh(new BoxGeometry(0.22, 3.0, 6.6), cellWallMat);
       side.position.set(cx, 1.5, z - 7.9);
       scene.add(side);
+      addInteriorCollider(cx, z - 7.9, 0.22, 6.6);
     }
     const topRail = new Mesh(new BoxGeometry(11.6, 0.14, 0.16), barMat);
     topRail.position.set(x - 3.6, 3.05, z - 4.65);
     const bottomRail = new Mesh(new BoxGeometry(11.6, 0.14, 0.16), barMat);
     bottomRail.position.set(x - 3.6, 0.35, z - 4.65);
     scene.add(topRail, bottomRail);
+    addInteriorCollider(x - 3.6, z - 4.65, 11.6, 0.16);
     for (let i = 0; i < 9; i++) {
       const bar = new Mesh(new CylinderGeometry(0.045, 0.045, 2.7, 8), barMat);
       bar.position.set(x - 8.2 + i * 1.15, 1.7, z - 4.65);
@@ -558,9 +950,11 @@ function makeLocationInterior(loc, index) {
     const bunk = new Mesh(new BoxGeometry(3.2, 0.35, 1.5), new MeshStandardMaterial({ color: 0x303844, roughness: 0.65 }));
     bunk.position.set(x - 1.4, 0.55, z - 9.6);
     scene.add(bunk);
+    addInteriorCollider(x - 1.4, z - 9.6, 3.2, 1.5);
     loc.jailCellPos = new Vector3(x - 5.2, 0, z - 8.2);
     loc.jailCameraPos = new Vector3(x + 3.6, 3.0, z - 1.4);
-    loc.releasePos = new Vector3(x, 0, z + 8);
+    loc.jailCellBounds = { minX: x - 9.05, maxX: x + 1.85, minZ: z - 10.65, maxZ: z - 5.25 };
+    loc.releasePos = new Vector3(x, 0, z + 9);
   } else if (loc.type === 'casino') {
     const table = new Mesh(
       new CylinderGeometry(5.2, 5.2, 0.35, 32),
@@ -603,7 +997,33 @@ function makeLocationInterior(loc, index) {
     const service = new Mesh(new BoxGeometry(10, 1.2, 2.2), new MeshStandardMaterial({ color: loc.color, roughness: 0.55 }));
     service.position.set(x, 0.6, z - 5);
     scene.add(service);
+    addInteriorCollider(x, z - 5, 10, 2.2);
     makeNeonLight(x, 3.2, z - 2, loc.lightColor, 1.5, 20);
+    if (loc.type === 'garage') {
+      addToolBench(x - 10.5, z + 5.6, Math.PI / 2);
+      for (const [tx, tz] of [[x + 10.5, z + 5.8], [x + 12.4, z + 5.8], [x + 10.5, z + 7.6], [x + 12.4, z + 7.6]]) {
+        const tire = new Mesh(new CylinderGeometry(0.58, 0.58, 0.35, 18), new MeshStandardMaterial({ color: 0x101014, roughness: 0.9 }));
+        tire.position.set(tx, 0.58, tz);
+        tire.rotation.x = Math.PI / 2;
+        scene.add(tire);
+      }
+      addSmallCrate(x - 13.2, z - 9.8, 0x56606a);
+      addSmallCrate(x - 12.1, z - 9.6, 0x4a5866);
+    } else if (loc.type === 'shop') {
+      for (const [sx, sz] of [[x - 8.5, z - 0.6], [x - 4.5, z - 0.6], [x + 4.5, z - 0.6], [x + 8.5, z - 0.6]]) {
+        const shelf = new Mesh(new BoxGeometry(2.4, 1.65, 0.72), new MeshStandardMaterial({ color: 0x2d4258, roughness: 0.58 }));
+        shelf.position.set(sx, 0.82, sz);
+        scene.add(shelf);
+        addInteriorCollider(sx, sz, 2.4, 0.72);
+        addInteriorInteractable(shelf, 'pickup', 'TAKE SHOP ITEM', 2.4);
+      }
+      addVendingMachine(x + 13.4, z + 8.8, -Math.PI / 2);
+      addSmallCrate(x - 13.4, z + 7.6, 0x2f5870);
+    } else if (loc.type === 'gas') {
+      addVendingMachine(x - 13.4, z + 8.8, Math.PI / 2);
+      addToolBench(x + 10.8, z + 7.4, -Math.PI / 2);
+      for (const [cx, cz] of [[x - 10, z - 8.4], [x - 8.8, z - 8.2], [x + 12, z - 8.8]]) addSmallCrate(cx, cz, 0x3d6b50);
+    }
     for (let i = 0; i < 3; i++) makeSceneActor(x - 4 + i * 4, z + 1, loc.color, 'idle');
   }
 }
@@ -660,6 +1080,58 @@ function makeLocation(opts, index) {
   marker.position.set(0, 0.08, opts.d / 2 + 3.7);
   g.add(marker);
 
+  if (opts.type === 'gas') {
+    loc.gasPumps = [];
+    const concreteMat = new MeshStandardMaterial({ color: 0xb8b2a4, roughness: 0.86 });
+    const pumpMat = new MeshStandardMaterial({ color: 0x1f5c43, roughness: 0.42, metalness: 0.18 });
+    const hoseMat = new MeshStandardMaterial({ color: 0x101018, roughness: 0.66 });
+    const islandMat = new MeshStandardMaterial({ color: 0xddddcf, roughness: 0.72 });
+    const canopyMat = new MeshStandardMaterial({ color: 0x14593c, roughness: 0.55, metalness: 0.08 });
+    const slab = new Mesh(new PlaneGeometry(25, 11), concreteMat);
+    slab.rotation.x = -Math.PI / 2;
+    slab.position.set(0, 0.065, opts.d / 2 + 3.0);
+    slab.receiveShadow = true;
+    g.add(slab);
+
+    const canopy = new Mesh(new BoxGeometry(23, 0.55, 7.4), canopyMat);
+    canopy.position.set(0, 5.2, opts.d / 2 + 3.6);
+    canopy.castShadow = true;
+    canopy.receiveShadow = true;
+    g.add(canopy);
+    const canopyStripe = new Mesh(new BoxGeometry(23.4, 0.18, 0.35), new MeshBasicMaterial({ color: 0xffd200 }));
+    canopyStripe.position.set(0, 4.86, opts.d / 2 - 0.1);
+    g.add(canopyStripe);
+    for (const [px, pz] of [[-9.5, opts.d / 2 + 0.6], [9.5, opts.d / 2 + 0.6], [-9.5, opts.d / 2 + 6.6], [9.5, opts.d / 2 + 6.6]]) {
+      const post = new Mesh(new BoxGeometry(0.42, 5.1, 0.42), new MeshStandardMaterial({ color: 0xe6e0d0, roughness: 0.55 }));
+      post.position.set(px, 2.55, pz);
+      post.castShadow = true;
+      g.add(post);
+    }
+
+    for (const [px, pz, rot] of [[-5.2, opts.d / 2 + 2.0, 0], [5.2, opts.d / 2 + 2.0, 0], [-5.2, opts.d / 2 + 5.5, Math.PI], [5.2, opts.d / 2 + 5.5, Math.PI]]) {
+      const island = new Mesh(new BoxGeometry(4.8, 0.24, 1.05), islandMat);
+      island.position.set(px, 0.13, pz);
+      island.rotation.y = rot;
+      island.receiveShadow = true;
+      g.add(island);
+      const pump = new Mesh(new BoxGeometry(1.15, 2.0, 0.72), pumpMat);
+      pump.position.set(px, 1.12, pz);
+      pump.rotation.y = rot;
+      pump.castShadow = true;
+      g.add(pump);
+      const screen = new Mesh(new BoxGeometry(0.66, 0.36, 0.05), new MeshStandardMaterial({ color: 0x88c8ff, emissive: 0x2080ff, emissiveIntensity: 0.55 }));
+      screen.position.set(px, 1.55, pz + (rot === 0 ? -0.39 : 0.39));
+      screen.rotation.y = rot;
+      g.add(screen);
+      const hose = new Mesh(new BoxGeometry(0.08, 1.25, 0.08), hoseMat);
+      hose.position.set(px + 0.48, 0.98, pz + (rot === 0 ? -0.42 : 0.42));
+      hose.rotation.z = 0.22;
+      g.add(hose);
+      loc.gasPumps.push({ x: opts.x + px, z: opts.z + pz, rotation: rot });
+      buildings.push({ x: opts.x + px, z: opts.z + pz, w: 2.4, d: 0.75, h: 2.2, mesh: null });
+    }
+  }
+
   g.position.set(opts.x, 0, opts.z);
   scene.add(g);
   loc.group = g;
@@ -670,6 +1142,213 @@ function makeLocation(opts, index) {
 
   makeLocationInterior(loc, index);
   return loc;
+}
+
+function makeParkingLot(cx, cz, rotation = 0, cols = 5) {
+  const width = 28;
+  const depth = 22;
+  const slotSpacing = 6.2;
+  const slotDepth = 7.4;
+  removeOverlappingBuildings(cx, cz, width + 8, depth + 16, 2);
+  reserveArea(cx, cz, width, depth + 10, 3);
+  const localToWorld = (lx, lz) => {
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
+    return { x: cx + lx * cos + lz * sin, z: cz - lx * sin + lz * cos };
+  };
+  const addLotCollider = (lx, lz, w, d) => {
+    const p = localToWorld(lx, lz);
+    const cos = Math.abs(Math.cos(rotation));
+    const sin = Math.abs(Math.sin(rotation));
+    buildings.push({
+      x: p.x,
+      z: p.z,
+      w: (w * cos + d * sin) / 2,
+      d: (w * sin + d * cos) / 2,
+      h: 2,
+      mesh: null,
+    });
+  };
+
+  const lot = new Group();
+  const dirt = new Mesh(
+    new PlaneGeometry(width + 4, depth + 4),
+    new MeshStandardMaterial({ color: 0x5b543a, roughness: 0.98 })
+  );
+  dirt.rotation.x = -Math.PI / 2;
+  dirt.position.y = 0.045;
+  dirt.receiveShadow = true;
+  lot.add(dirt);
+
+  const asphalt = new Mesh(
+    new PlaneGeometry(width - 2.4, depth - 2.8),
+    new MeshStandardMaterial({ color: 0x24242a, roughness: 0.96 })
+  );
+  asphalt.rotation.x = -Math.PI / 2;
+  asphalt.position.y = 0.07;
+  asphalt.receiveShadow = true;
+  lot.add(asphalt);
+
+  const curbMat = new MeshStandardMaterial({ color: 0x73737c, roughness: 0.82 });
+  const frontCurbWidth = width / 2 - 6.6;
+  const curbSpecs = [
+    [0, -depth / 2 + 1, width - 1.2, 0.55],
+    [-width / 4 - 3.3, depth / 2 - 1, frontCurbWidth, 0.55],
+    [width / 4 + 3.3, depth / 2 - 1, frontCurbWidth, 0.55],
+    [-width / 2 + 1, 0, 0.55, depth - 1.2],
+    [width / 2 - 1, 0, 0.55, depth - 1.2],
+  ];
+  for (const [lx, lz, w, d] of curbSpecs) {
+    const curb = new Mesh(new BoxGeometry(w, 0.24, d), curbMat);
+    curb.position.set(lx, 0.16, lz);
+    curb.receiveShadow = true;
+    lot.add(curb);
+    addLotCollider(lx, lz, w, d);
+  }
+
+  const fenceMat = new MeshStandardMaterial({ color: 0x26303a, roughness: 0.45, metalness: 0.65 });
+  const addFenceRun = (horizontal, fixed, from, to) => {
+    const step = 3.2;
+    for (let p = from; p <= to + 0.1; p += step) {
+      const post = new Mesh(new BoxGeometry(0.16, 1.65, 0.16), fenceMat);
+      post.position.set(horizontal ? p : fixed, 0.86, horizontal ? fixed : p);
+      post.castShadow = true;
+      lot.add(post);
+    }
+    const length = Math.abs(to - from);
+    for (const y of [0.72, 1.35]) {
+      const rail = new Mesh(
+        horizontal ? new BoxGeometry(length, 0.1, 0.12) : new BoxGeometry(0.12, 0.1, length),
+        fenceMat
+      );
+      rail.position.set(horizontal ? (from + to) / 2 : fixed, y, horizontal ? fixed : (from + to) / 2);
+      rail.castShadow = true;
+      lot.add(rail);
+    }
+    addLotCollider(
+      horizontal ? (from + to) / 2 : fixed,
+      horizontal ? fixed : (from + to) / 2,
+      horizontal ? length : 0.7,
+      horizontal ? 0.7 : length
+    );
+  };
+  addFenceRun(true, -depth / 2 - 1.2, -width / 2 - 1.2, width / 2 + 1.2);
+  addFenceRun(false, -width / 2 - 1.2, -depth / 2 - 1.2, depth / 2 + 1.2);
+  addFenceRun(false, width / 2 + 1.2, -depth / 2 - 1.2, depth / 2 + 1.2);
+  addFenceRun(true, depth / 2 + 1.2, -width / 2 - 1.2, -5.2);
+  addFenceRun(true, depth / 2 + 1.2, 5.2, width / 2 + 1.2);
+
+  const dividerLen = depth - 10.5;
+  const divider = new Mesh(new BoxGeometry(0.28, 0.14, dividerLen), curbMat);
+  divider.position.set(-6.4, 0.14, -2.6);
+  divider.receiveShadow = true;
+  lot.add(divider);
+  addLotCollider(-6.4, -2.6, 0.28, dividerLen);
+
+  const stripeMat = new MeshBasicMaterial({ color: 0xffd200 });
+  const bikeStripeMat = new MeshBasicMaterial({ color: 0x88c8ff });
+  const carRowZ = -5.8;
+  const carFirstX = -1.2;
+  for (let c = 0; c <= cols; c++) {
+    const stripe = new Mesh(new PlaneGeometry(0.12, slotDepth), stripeMat);
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(carFirstX - slotSpacing / 2 + c * slotSpacing, 0.11, carRowZ);
+    lot.add(stripe);
+  }
+  const stopLine = new Mesh(new PlaneGeometry(cols * slotSpacing, 0.12), stripeMat);
+  stopLine.rotation.x = -Math.PI / 2;
+  stopLine.position.set(carFirstX + (cols - 1) * slotSpacing / 2, 0.11, carRowZ - slotDepth / 2);
+  lot.add(stopLine);
+  const aisleArrow = new Mesh(new ConeGeometry(0.55, 1.6, 3), new MeshBasicMaterial({ color: 0xffd200 }));
+  aisleArrow.rotation.x = -Math.PI / 2;
+  aisleArrow.rotation.z = Math.PI;
+  aisleArrow.position.set(4.8, 0.12, 3.4);
+  lot.add(aisleArrow);
+  const bikeSlotX = -12.3;
+  const bikeSlotZ = -2.3;
+  const bikeSlotSpacing = 1.55;
+  const bikeSlotLength = 4.9;
+  for (let i = 0; i <= 4; i++) {
+    const stripe = new Mesh(new PlaneGeometry(0.1, 3.2), bikeStripeMat);
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.set(bikeSlotX - bikeSlotSpacing / 2 + i * bikeSlotSpacing, 0.12, bikeSlotZ);
+    lot.add(stripe);
+  }
+  const bikeStop = new Mesh(new PlaneGeometry(bikeSlotSpacing * 4, 0.12), bikeStripeMat);
+  bikeStop.rotation.x = -Math.PI / 2;
+  bikeStop.position.set(bikeSlotX + bikeSlotSpacing * 1.5, 0.12, bikeSlotZ - bikeSlotLength / 2);
+  lot.add(bikeStop);
+  const bikeAisleLine = new Mesh(new PlaneGeometry(bikeSlotSpacing * 4, 0.12), bikeStripeMat);
+  bikeAisleLine.rotation.x = -Math.PI / 2;
+  bikeAisleLine.position.set(bikeSlotX + bikeSlotSpacing * 1.5, 0.12, bikeSlotZ + bikeSlotLength / 2);
+  lot.add(bikeAisleLine);
+
+  const sign = makeSign('PARKING', '#ffd200', '#00c3ff', 5.2, 1.4);
+  sign.position.set(-width / 2 + 4.5, 2.25, -depth / 2 + 1.5);
+  lot.add(sign);
+  const bikeSign = makeSign('BIKES', '#88c8ff', '#2080ff', 4.2, 1.2);
+  bikeSign.position.set(-11.2, 1.75, -depth / 2 + 1.8);
+  lot.add(bikeSign);
+
+  const boothMat = new MeshStandardMaterial({ color: 0x394454, roughness: 0.58, metalness: 0.1 });
+  const booth = new Mesh(new BoxGeometry(3.0, 2.5, 2.8), boothMat);
+  booth.position.set(width / 2 - 3.3, 1.25, depth / 2 - 3.2);
+  booth.castShadow = true;
+  booth.receiveShadow = true;
+  lot.add(booth);
+  addLotCollider(width / 2 - 3.3, depth / 2 - 3.2, 3.0, 2.8);
+  const boothWindow = new Mesh(new BoxGeometry(1.8, 0.72, 0.08), new MeshBasicMaterial({ color: 0x88c8ff }));
+  boothWindow.position.set(width / 2 - 3.3, 1.58, depth / 2 - 1.76);
+  lot.add(boothWindow);
+
+  const barrierPivot = new Group();
+  barrierPivot.position.set(-3.9, 1.18, depth / 2 + 0.9);
+  const barrierPost = new Mesh(new BoxGeometry(0.34, 1.4, 0.34), new MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.42, metalness: 0.35 }));
+  barrierPost.position.set(-3.9, 0.7, depth / 2 + 0.9);
+  barrierPost.castShadow = true;
+  const arm = new Mesh(new BoxGeometry(7.8, 0.16, 0.18), new MeshStandardMaterial({ color: 0xff3030, roughness: 0.45 }));
+  arm.position.set(3.9, 0.12, 0);
+  const hinge = new Mesh(new SphereGeometry(0.24, 10, 8), new MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.36, metalness: 0.5 }));
+  hinge.position.set(-3.9, 1.2, depth / 2 + 0.9);
+  hinge.castShadow = true;
+  barrierPivot.add(arm);
+  lot.add(barrierPost, hinge, barrierPivot);
+
+  const drivewayStart = depth / 2 + 1.2;
+  const drivewayEnd = BLOCK / 2 - ROAD / 2 - 1.0;
+  const drivewayLen = Math.max(0.1, drivewayEnd - drivewayStart);
+  const driveway = new Mesh(
+    new PlaneGeometry(8.6, drivewayLen),
+    new MeshStandardMaterial({ color: 0xb7b09f, roughness: 0.88 })
+  );
+  driveway.rotation.x = -Math.PI / 2;
+  driveway.position.set(0, 0.082, drivewayStart + drivewayLen / 2);
+  driveway.receiveShadow = true;
+  lot.add(driveway);
+
+  lot.position.set(cx, 0, cz);
+  lot.rotation.y = rotation;
+  scene.add(lot);
+
+  const gateWorld = localToWorld(0, depth / 2 + 1.2);
+  parkingGateArms.push({ pivot: barrierPivot, x: gateWorld.x, z: gateWorld.z, open: 0 });
+  for (let c = 0; c < cols; c++) {
+    const p = localToWorld(carFirstX + c * slotSpacing, carRowZ);
+    parkingSlots.push({ x: p.x, z: p.z, rotation, kind: 'car', parkedInLot: true });
+  }
+  for (let i = 0; i < 4; i++) {
+    const p = localToWorld(bikeSlotX + i * bikeSlotSpacing, bikeSlotZ);
+    parkingSlots.push({ x: p.x, z: p.z, rotation: rotation, kind: 'bike', parkedInLot: true });
+  }
+
+  const guardA = localToWorld(-6.7, depth / 2 + 2.6);
+  const guardB = localToWorld(width / 2 - 3.2, depth / 2 + 0.2);
+  const g1 = makeSceneActor(guardA.x, guardA.z, 0x1f5fff, 'guard');
+  const g2 = makeSceneActor(guardB.x, guardB.z, 0x1f5fff, 'guard');
+  g1.position.set(guardA.x, 0, guardA.z);
+  g2.position.set(guardB.x, 0, guardB.z);
+  g1.rotation.y = rotation + Math.PI;
+  g2.rotation.y = rotation - Math.PI / 2;
 }
 
 function makeContainerStack(x, z, cols = 3) {
@@ -897,6 +1576,10 @@ makeLocation({
   signGlow: '#00c3ff',
   x: 62, z: 62, w: 17, d: 11, h: 8,
 }, 5);
+
+makeParkingLot(-100, -100, 0, 3);
+makeParkingLot(100, -20, Math.PI / 2, 3);
+makeParkingLot(-20, 100, 0, 3);
 
 decorateLocation(makeLocation({
   id: 'airport',

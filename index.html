@@ -27,6 +27,7 @@
     <div><kbd>F</kbd>Vào / Ra xe</div>
     <div><kbd>F</kbd>Cướp xe đang chạy</div>
     <div><kbd>E</kbd>Đánh / tấn công</div>
+    <div><kbd>M</kbd>Mở bản đồ</div>
     <div><kbd>1/2/0</kbd>Súng / đồ / tay không</div>
     <div><kbd>CHUỘT</kbd>Xoay camera</div>
     <div><kbd>ESC</kbd>Thả chuột</div>
@@ -64,6 +65,7 @@
     <div class="key-row"><kbd>SHIFT</kbd><span class="desc">sprint</span></div>
     <div class="key-row"><kbd>SPACE</kbd><span class="desc">jump</span></div>
     <div class="key-row"><kbd>F</kbd><span class="desc">enter vehicle</span></div>
+    <div class="key-row"><kbd>M</kbd><span class="desc">map / waypoint</span></div>
     <div class="key-row"><kbd>E</kbd><span class="desc">hit</span></div>
     <div class="key-row"><kbd>1/2/0</kbd><span class="desc">weapon / item / empty</span></div>
   </div>
@@ -87,6 +89,18 @@
     <div id="districtLabel" class="map-label">DOWNTOWN</div>
   </div>
 
+  <div id="worldMapPanel" aria-label="City map">
+    <div class="world-map-top">
+      <div class="world-map-title">CITY MAP</div>
+      <div class="world-map-actions">
+        <button id="clearWaypointBtn" type="button">CLEAR</button>
+        <button id="closeMapBtn" type="button">CLOSE</button>
+      </div>
+    </div>
+    <canvas id="worldMap" width="720" height="720"></canvas>
+    <div id="worldMapHint">NO DESTINATION</div>
+  </div>
+
   <div class="crosshair"></div>
 
   <div id="prompt"><kbd>F</kbd>ENTER VEHICLE</div>
@@ -103,6 +117,7 @@
       <button id="mobileRunBtn" class="mobile-btn secondary" type="button" data-touch-key="ShiftLeft" aria-label="Sprint or boost">RUN</button>
       <button id="mobileJumpBtn" class="mobile-btn" type="button" data-touch-key="Space" aria-label="Jump or handbrake">JUMP</button>
       <button id="mobileHitBtn" class="mobile-btn secondary" type="button" data-touch-key="KeyE" aria-label="Hit or attack">HIT</button>
+      <button id="mobileMapBtn" class="mobile-btn secondary" type="button" aria-label="Open map">MAP</button>
     </div>
   </div>
 </div>

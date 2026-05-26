@@ -32,6 +32,7 @@ let environmentWeatherIndex = 0;
 let nextWeatherTimer = 70 + Math.random() * 70;
 let visualUpdateTimer = 99;
 let hudUpdateTimer = 99;
+let rainUpdateTimer = 0;
 let environmentExposure = renderer.toneMappingExposure;
 let lightningFlash = 0;
 let lightningFlashTarget = 0;
@@ -309,6 +310,15 @@ function updateRain(dt) {
   rainPositionAttribute.needsUpdate = true;
 }
 
+function tickRain(dt) {
+  const preset = getEnvironmentPreset();
+  rainUpdateTimer += dt;
+  if (rainUpdateTimer < 1 / preset.rainHz) return;
+  const rainDt = Math.min(0.08, rainUpdateTimer);
+  rainUpdateTimer = 0;
+  updateRain(rainDt);
+}
+
 function updateEnvironmentHud(force = false) {
   const preset = getEnvironmentPreset();
   if (!force && hudUpdateTimer < 1 / preset.hudHz) return;
@@ -327,7 +337,7 @@ function updateEnvironment(dt) {
 
   updateWeatherBlend(dt);
   updateLightning(dt);
-  updateRain(dt);
+  tickRain(dt);
 
   visualUpdateTimer += dt;
   hudUpdateTimer += dt;

@@ -11,16 +11,17 @@ const { Scene, PerspectiveCamera, WebGLRenderer, Color, Fog, PCFSoftShadowMap,
 // -------------------- OPTIMIZED GRAPHICS PRESET --------------------
 const GFX = {
   pixelRatioCap: 1,
-  shadowMapSize: 1024,
-  environmentHz: 8,
-  hudHz: 4,
-  rainParticles: 400,
-  stormParticles: 600,
-  rainRadius: 52,
-  rainHeight: 38,
-  rainSize: 1.1,
+  shadowMapSize: 768,
+  environmentHz: 4,
+  hudHz: 2,
+  rainHz: 20,
+  rainParticles: 180,
+  stormParticles: 260,
+  rainRadius: 42,
+  rainHeight: 34,
+  rainSize: 1.0,
   roadWetRoughness: 0.58,
-  lightningExposure: 0.15,
+  lightningExposure: 0.12,
 };
 
 function applyGfxSettings() {

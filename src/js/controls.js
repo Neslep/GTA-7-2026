@@ -22,6 +22,7 @@ addEventListener('mousemove', e => {
   if (mouse.locked) { mouse.dx += e.movementX; mouse.dy += e.movementY; }
 });
 addEventListener('mousedown', e => {
+  if (worldMapOpen) return;
   if (e.button === 0 && hud.classList.contains('active') && !inVehicle && !blackjackActive) setInputKey('keyboard', 'KeyE', true);
 });
 addEventListener('mouseup', e => {
@@ -35,6 +36,7 @@ const mobileRunBtn = document.getElementById('mobileRunBtn');
 const mobileJumpBtn = document.getElementById('mobileJumpBtn');
 const mobileCarBtn = document.getElementById('mobileCarBtn');
 const mobileHitBtn = document.getElementById('mobileHitBtn');
+const mobileMapBtn = document.getElementById('mobileMapBtn');
 const qualityButtons = [];
 
 if (hasTouchControls) document.body.classList.add('touch-ui');
@@ -161,7 +163,14 @@ document.querySelectorAll('[data-touch-key]').forEach(button => {
   button.addEventListener('contextmenu', e => e.preventDefault());
 });
 
-let lastMobileControlMode = '';
+if (mobileMapBtn) {
+  mobileMapBtn.addEventListener('pointerdown', e => {
+    if (!hud.classList.contains('active')) return;
+    if (typeof toggleWorldMap === 'function') toggleWorldMap();
+    e.preventDefault();
+  });
+}
+
 function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false, canUseLocation = false, locationLabel = 'ENTER') {
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
   const runLabel = driving ? 'BOOST' : 'RUN';
@@ -185,6 +194,8 @@ addEventListener('blur', () => {
 
 let fPressedLast = false;
 let ePressedLast = false;
+let mPressedLast = false;
+let worldMapOpen = false;
 
 // -------------------- CAMERA ORBIT STATE --------------------
 const camYaw = { v: 0 };
@@ -197,6 +208,7 @@ let nearestTrafficVehicle = null; // running AI traffic car available for hijack
 let nearestLocation = null; // interactive city landmark
 let nearestMissionStart = null;
 let nearestServiceLocation = null;
+let nearestInteriorObject = null;
 let activeLocation = null;  // player is inside this landmark interior
 let locationReturnPos = new Vector3();
 let wantedLevel = 0;
@@ -215,8 +227,13 @@ let hijackState = null;
 let arrestState = null;
 let jailTimer = 0;
 let cuffVisual = null;
+let trafficHijackCount = 0;
+const TRAFFIC_HIJACK_WANTED_THRESHOLD = 3;
+let buildingRaidState = null;
+const POLICE_ARRESTS_ENABLED = false;
 const activeProjectiles = [];
 const activeEffects = [];
+let refuelState = null;
 const fxGeometries = {
   muzzleFlame: new ConeGeometry(0.18, 0.7, 10),
   muzzleCore: new SphereGeometry(0.12, 8, 6),
@@ -256,6 +273,11 @@ const missionCatalog = [
 
 // -------------------- COLLISION HELPER --------------------
 function collidesAt(x, z, radius = 0.6) {
+  if (activeLocation && activeLocation.interiorColliders) {
+    for (const c of activeLocation.interiorColliders) {
+      if (Math.abs(x - c.x) < c.w + radius && Math.abs(z - c.z) < c.d + radius) return c;
+    }
+  }
   for (const b of buildings) {
     if (Math.abs(x - b.x) < b.w + radius && Math.abs(z - b.z) < b.d + radius) {
       return b;
@@ -434,6 +456,12 @@ function reportCrime(level = 1, reason = 'WANTED') {
   if (modeEl && !inVehicle) modeEl.textContent = reason;
 }
 
+function reportTrafficHijackCrime() {
+  trafficHijackCount++;
+  if (trafficHijackCount < TRAFFIC_HIJACK_WANTED_THRESHOLD) return;
+  reportCrime(trafficHijackCount === TRAFFIC_HIJACK_WANTED_THRESHOLD ? 2 : 1, 'CAR THEFT');
+}
+
 function enterLocation(loc) {
   if (!loc || inVehicle) return;
   locationReturnPos.copy(loc.entrance);
@@ -451,6 +479,7 @@ function enterLocation(loc) {
 
 function exitLocation() {
   if (!activeLocation) return;
+  stopPoliceBuildingRaid();
   player.group.position.set(locationReturnPos.x, 0, locationReturnPos.z + 1.6);
   player.velocityY = 0;
   player.onGround = true;
@@ -491,6 +520,106 @@ function tryBankVaultInteraction() {
   return true;
 }
 
+function findNearestInteriorObject() {
+  if (!activeLocation || !activeLocation.interactables || inVehicle) return null;
+  let nearest = null;
+  let best = 2.7;
+  for (const item of activeLocation.interactables) {
+    if (!item || item.used) continue;
+    item.cooldown = Math.max(0, item.cooldown || 0);
+    const d = Math.hypot(item.x - player.group.position.x, item.z - player.group.position.z);
+    const radius = item.radius || 2.4;
+    if (d < Math.min(best, radius)) {
+      best = d;
+      nearest = item;
+    }
+  }
+  return nearest;
+}
+
+function updateInteriorObjects(dt) {
+  if (!activeLocation || !activeLocation.interactables) return;
+  for (const item of activeLocation.interactables) {
+    item.cooldown = Math.max(0, (item.cooldown || 0) - dt);
+    if (!item.mesh) continue;
+    const pulse = item.cooldown > 0 ? 1 + Math.sin(performance.now() * 0.02) * 0.04 : 1;
+    item.mesh.scale.setScalar(pulse);
+  }
+}
+
+function pulseInteriorObject(item, color = 0xffd200) {
+  if (!item || !item.mesh) return;
+  const pos = new Vector3();
+  item.mesh.getWorldPosition(pos);
+  spawnSparkBurst(pos.x, 1.0, pos.z, 0.65);
+  const glow = new PointLight(color, 2.2, 7);
+  glow.position.set(pos.x, 2.0, pos.z);
+  scene.add(glow);
+  activeEffects.push({ group: glow, ttl: 0.28, maxTtl: 0.28, kind: 'light' });
+}
+
+function tryInteriorObjectInteraction() {
+  const item = findNearestInteriorObject();
+  if (!item || item.cooldown > 0) return false;
+  item.cooldown = 0.9;
+  nearestInteriorObject = item;
+
+  if (item.type === 'pickup') {
+    setHeldItem('object');
+    pulseInteriorObject(item, 0x88c8ff);
+    document.getElementById('mode').textContent = 'ITEM TAKEN';
+    return true;
+  }
+  if (item.type === 'vending') {
+    player.actionTimer = 0.28;
+    setHeldItem('object');
+    pulseInteriorObject(item, 0x10b070);
+    document.getElementById('mode').textContent = 'SNACK READY';
+    return true;
+  }
+  if (item.type === 'arcade') {
+    player.actionTimer = 0.45;
+    pulseInteriorObject(item, 0xff00cc);
+    if (activeLocation && activeLocation.danceFloor) activeLocation.danceFloor.material.emissiveIntensity = 1.7;
+    document.getElementById('mode').textContent = 'ARCADE WIN';
+    return true;
+  }
+  if (item.type === 'jukebox') {
+    pulseInteriorObject(item, 0xff5900);
+    for (const actor of citySceneActors) {
+      if (Math.hypot(actor.group.position.x - player.group.position.x, actor.group.position.z - player.group.position.z) < 22) actor.mode = 'dance';
+    }
+    document.getElementById('mode').textContent = 'MUSIC ON';
+    return true;
+  }
+  if (item.type === 'cash' || item.type === 'atm' || item.type === 'terminal' || item.type === 'vault') {
+    pulseInteriorObject(item, item.type === 'terminal' ? 0x2080ff : 0xffd200);
+    if (activeLocation && activeLocation.type === 'bank') triggerBankAlarm();
+    document.getElementById('mode').textContent = item.type === 'terminal' ? 'SYSTEM BREACHED' : 'LOOTED';
+    return true;
+  }
+  if (item.type === 'armory') {
+    setHeldItem('gun');
+    pulseInteriorObject(item, 0xff3030);
+    reportCrime(1, 'ARMORY');
+    document.getElementById('mode').textContent = 'ARMED';
+    return true;
+  }
+  if (item.type === 'locker') {
+    setHeldItem(player.heldType === 'object' ? 'gun' : 'object');
+    pulseInteriorObject(item, 0x2080ff);
+    document.getElementById('mode').textContent = 'LOCKER SEARCHED';
+    return true;
+  }
+  if (item.type === 'tools') {
+    setHeldItem('object');
+    pulseInteriorObject(item, 0xff7030);
+    document.getElementById('mode').textContent = 'TOOL BOX';
+    return true;
+  }
+  return false;
+}
+
 function isNearSensitiveLocation(x, z) {
   if (activeLocation && (activeLocation.type === 'bank' || activeLocation.type === 'police')) return true;
   for (const loc of cityLocations) {
@@ -529,7 +658,6 @@ function hitNearbySceneActor() {
   target.group.position.x += dx / dist * knock;
   target.group.position.z += dz / dist * knock;
   target.hitTimer = 0.28;
-  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
   return true;
 }
 
@@ -575,6 +703,11 @@ function repairVehicleAtGarage(veh) {
   return true;
 }
 
+function ensureVehicleFuelState(veh) {
+  if (!veh) return;
+  if (typeof veh.fuel !== 'number') veh.fuel = 100;
+}
+
 function findNearestServiceLocation() {
   if (activeLocation) return null;
   const ref = getPlayerRefPosition();
@@ -599,11 +732,7 @@ function useServiceLocation(loc) {
     return true;
   }
   if (loc.type === 'gas' && inVehicle) {
-    ensureVehicleDamageState(inVehicle);
-    inVehicle.health = Math.min(100, inVehicle.health + 35);
-    if (inVehicle.smoke) inVehicle.smoke.visible = inVehicle.health < 45;
-    setWantedLevel(Math.max(0, wantedLevel - 1));
-    return true;
+    return startRefuelScene(loc, inVehicle);
   }
   if (loc.type === 'shop' && !inVehicle) {
     setHeldItem(player.heldType === 'gun' ? 'object' : 'gun');
@@ -616,6 +745,190 @@ function useServiceLocation(loc) {
     return true;
   }
   return false;
+}
+
+function findNearestGasPump(loc, veh) {
+  if (!loc || !loc.gasPumps || !loc.gasPumps.length || !veh) return null;
+  let nearest = loc.gasPumps[0];
+  let best = Infinity;
+  for (const pump of loc.gasPumps) {
+    const d = Math.hypot(pump.x - veh.group.position.x, pump.z - veh.group.position.z);
+    if (d < best) {
+      best = d;
+      nearest = pump;
+    }
+  }
+  return nearest;
+}
+
+function startRefuelScene(loc, veh) {
+  if (refuelState || !veh) return false;
+  ensureVehicleDamageState(veh);
+  ensureVehicleFuelState(veh);
+  const pump = findNearestGasPump(loc, veh) || loc.entrance;
+  const group = new Group();
+  const hose = new Mesh(
+    new BoxGeometry(0.08, 0.08, 1),
+    new MeshBasicMaterial({ color: 0x101018 })
+  );
+  const nozzle = new Mesh(
+    new BoxGeometry(0.22, 0.18, 0.62),
+    new MeshStandardMaterial({ color: 0x202028, roughness: 0.45, metalness: 0.55 })
+  );
+  group.add(hose, nozzle);
+  scene.add(group);
+  refuelState = {
+    loc,
+    veh,
+    pump,
+    group,
+    hose,
+    nozzle,
+    timer: 0,
+    duration: 3.2,
+    prevPlayerVisible: player.group.visible,
+    prevHeldVisible: player.heldItem.visible,
+  };
+  veh.velocity = 0;
+  player.group.visible = true;
+  player.heldItem.visible = false;
+  document.getElementById('mode').textContent = 'REFUELING';
+  return true;
+}
+
+function updateRefuelScene(dt) {
+  if (!refuelState) return;
+  const r = refuelState;
+  r.timer += dt;
+  r.veh.velocity = 0;
+  ensureVehicleFuelState(r.veh);
+
+  const yaw = r.veh.group.rotation.y;
+  const side = r.veh.kind === 'bike' ? 0.75 : 1.35;
+  const back = r.veh.kind === 'bike' ? -0.25 : -0.9;
+  const fillX = r.veh.group.position.x + Math.cos(yaw) * side + Math.sin(yaw) * back;
+  const fillZ = r.veh.group.position.z + Math.sin(yaw) * side + Math.cos(yaw) * back;
+  const pumpX = r.pump.x;
+  const pumpZ = r.pump.z;
+  const dx = fillX - pumpX;
+  const dz = fillZ - pumpZ;
+  const len = Math.max(0.1, Math.hypot(dx, dz));
+
+  r.hose.scale.z = len;
+  r.hose.position.set((pumpX + fillX) / 2, 1.03, (pumpZ + fillZ) / 2);
+  r.hose.rotation.y = Math.atan2(dx, dz);
+  r.nozzle.position.set(fillX, 1.04, fillZ);
+  r.nozzle.rotation.y = yaw + Math.PI / 2;
+
+  const standX = pumpX + dx / len * Math.min(1.35, len * 0.45);
+  const standZ = pumpZ + dz / len * Math.min(1.35, len * 0.45);
+  player.group.position.set(standX, 0, standZ);
+  player.yaw = Math.atan2(fillX - standX, fillZ - standZ);
+  player.group.rotation.y = player.yaw;
+  player.body.rotation.x = 0.08;
+  player.head.rotation.x = -0.05;
+  player.leftArm.rotation.set(-0.75, 0, -0.25);
+  player.rightArm.rotation.set(-1.05, 0, 0.25);
+  player.leftLeg.rotation.set(0.1, 0, 0);
+  player.rightLeg.rotation.set(-0.08, 0, 0);
+
+  r.veh.fuel = Math.min(100, r.veh.fuel + dt * 34);
+  r.veh.health = Math.min(100, r.veh.health + dt * 12);
+  if (r.veh.smoke) r.veh.smoke.visible = r.veh.health < 45;
+
+  if (r.timer < r.duration) return;
+  scene.remove(r.group);
+  player.group.visible = r.prevPlayerVisible;
+  player.heldItem.visible = r.prevHeldVisible;
+  refuelState = null;
+  setWantedLevel(Math.max(0, wantedLevel - 1));
+  document.getElementById('mode').textContent = inVehicle ? (inVehicle.kind === 'bike' ? 'RIDING' : 'DRIVING') : 'ON FOOT';
+}
+
+function nearestRoadCenter(value) {
+  const idx = MathUtils.clamp(Math.round((value + HALF) / BLOCK), 0, GRID);
+  return -HALF + idx * BLOCK;
+}
+
+function nearestRoadPoint(x, z) {
+  const rx = nearestRoadCenter(x);
+  const rz = nearestRoadCenter(z);
+  return Math.abs(x - rx) < Math.abs(z - rz) ? { x: rx, z } : { x, z: rz };
+}
+
+function getRoadGuidedTarget(fromX, fromZ, toX, toZ) {
+  if (Math.hypot(toX - fromX, toZ - fromZ) < 11) return { x: toX, z: toZ };
+
+  const roadX = nearestRoadCenter(fromX);
+  const roadZ = nearestRoadCenter(fromZ);
+  const targetRoadX = nearestRoadCenter(toX);
+  const targetRoadZ = nearestRoadCenter(toZ);
+  const onVerticalRoad = Math.abs(fromX - roadX) < ROAD * 0.42;
+  const onHorizontalRoad = Math.abs(fromZ - roadZ) < ROAD * 0.42;
+
+  if (!onVerticalRoad && !onHorizontalRoad) return nearestRoadPoint(fromX, fromZ);
+  if (onVerticalRoad && onHorizontalRoad) {
+    return Math.abs(toZ - fromZ) > Math.abs(toX - fromX)
+      ? { x: roadX, z: targetRoadZ }
+      : { x: targetRoadX, z: roadZ };
+  }
+  if (onVerticalRoad) return Math.abs(fromZ - targetRoadZ) > 4 ? { x: roadX, z: targetRoadZ } : { x: toX, z: targetRoadZ };
+  return Math.abs(fromX - targetRoadX) > 4 ? { x: targetRoadX, z: roadZ } : { x: targetRoadX, z: toZ };
+}
+
+function getPoliceRoadPatrolTarget(car) {
+  const xRoad = nearestRoadCenter(car.group.position.x);
+  const zRoad = nearestRoadCenter(car.group.position.z);
+  const onVertical = Math.abs(car.group.position.x - xRoad) < ROAD * 0.55;
+  const onHorizontal = Math.abs(car.group.position.z - zRoad) < ROAD * 0.55;
+  if (!car.patrolAxis) car.patrolAxis = onVertical && !onHorizontal ? 'z' : (onHorizontal && !onVertical ? 'x' : (Math.random() < 0.5 ? 'x' : 'z'));
+  if (!car.patrolDir) car.patrolDir = Math.random() < 0.5 ? -1 : 1;
+
+  if (Math.random() < 0.28) {
+    car.patrolAxis = car.patrolAxis === 'x' ? 'z' : 'x';
+    car.patrolDir = Math.random() < 0.5 ? -1 : 1;
+  }
+
+  const baseX = car.patrolAxis === 'x' ? car.group.position.x : xRoad;
+  const baseZ = car.patrolAxis === 'z' ? car.group.position.z : zRoad;
+  let tx = car.patrolAxis === 'x' ? nearestRoadCenter(baseX + car.patrolDir * BLOCK) : xRoad;
+  let tz = car.patrolAxis === 'z' ? nearestRoadCenter(baseZ + car.patrolDir * BLOCK) : zRoad;
+  if (tx <= -HALF || tx >= HALF || tz <= -HALF || tz >= HALF) {
+    car.patrolDir *= -1;
+    tx = car.patrolAxis === 'x' ? nearestRoadCenter(baseX + car.patrolDir * BLOCK) : xRoad;
+    tz = car.patrolAxis === 'z' ? nearestRoadCenter(baseZ + car.patrolDir * BLOCK) : zRoad;
+  }
+  return { x: tx, z: tz };
+}
+
+function drivePoliceCarToward(car, target, dt, topSpeed, turnRate = 1.35) {
+  const dx = target.x - car.group.position.x;
+  const dz = target.z - car.group.position.z;
+  const dist = Math.max(0.001, Math.hypot(dx, dz));
+  const desiredYaw = Math.atan2(dx, dz);
+  let diff = desiredYaw - car.group.rotation.y;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  car.group.rotation.y += MathUtils.clamp(diff, -turnRate * dt, turnRate * dt);
+  const slowForTurn = MathUtils.clamp(1 - Math.abs(diff) / Math.PI, 0.35, 1);
+  const targetSpeed = topSpeed * slowForTurn * MathUtils.clamp(dist / 9, 0.25, 1);
+  car.velocity += (targetSpeed - car.velocity) * dt * 1.6;
+  const dirX = Math.sin(car.group.rotation.y);
+  const dirZ = Math.cos(car.group.rotation.y);
+  let nx = car.group.position.x + dirX * car.velocity * dt;
+  let nz = car.group.position.z + dirZ * car.velocity * dt;
+  const resolved = resolveCollision(car.group.position.x, car.group.position.z, nx, nz, 1.3);
+  nx = resolved[0];
+  nz = resolved[1];
+  if (nx === car.group.position.x && nz === car.group.position.z) {
+    car.velocity *= 0.35;
+    car.patrolTarget = null;
+    car.patrolDir = (car.patrolDir || 1) * -1;
+  }
+  car.group.position.x = nx;
+  car.group.position.z = nz;
+  for (const w of car.wheels) w.rotation.x += car.velocity * dt * 1.8;
+  return dist;
 }
 
 function canPlayBlackjack() {
@@ -859,7 +1172,8 @@ function spawnPoliceCar() {
   const car = wantedLevel >= 2 && Math.random() < 0.55 ? makePoliceVan() : makeCar(0x102040);
   const ref = getPlayerRefPosition();
   const angle = Math.random() * Math.PI * 2;
-  car.group.position.set(ref.x + Math.sin(angle) * 38, 0, ref.z + Math.cos(angle) * 38);
+  const spawnPoint = nearestRoadPoint(ref.x + Math.sin(angle) * 38, ref.z + Math.cos(angle) * 38);
+  car.group.position.set(spawnPoint.x, 0, spawnPoint.z);
   car.group.rotation.y = angle + Math.PI;
   let red = car.sirenRed;
   let blue = car.sirenBlue;
@@ -875,6 +1189,9 @@ function spawnPoliceCar() {
     ...car,
     kind: car.kind || 'police',
     policeRole: car.kind === 'policeVan' ? 'transport' : 'patrol',
+    patrolAxis: Math.random() < 0.5 ? 'x' : 'z',
+    patrolDir: Math.random() < 0.5 ? -1 : 1,
+    patrolTarget: null,
     velocity: 0,
     health: car.kind === 'policeVan' ? 190 : 140,
     sirenRed: red,
@@ -965,7 +1282,163 @@ function setOfficerPose(officer, moving, dt) {
   officer.body.position.y = 1.1 + Math.abs(swing) * 0.025;
 }
 
+function stopPoliceBuildingRaid() {
+  if (buildingRaidState && buildingRaidState.officer) scene.remove(buildingRaidState.officer.group);
+  buildingRaidState = null;
+}
+
+function startPoliceBuildingRaid(loc) {
+  if (!POLICE_ARRESTS_ENABLED) return;
+  if (!loc || arrestState || jailTimer > 0 || buildingRaidState) return;
+  const officer = makePoliceOfficerActor();
+  const start = loc.exitPos || loc.insidePos || player.group.position;
+  officer.group.position.set(start.x, 0, start.z);
+  officer.group.rotation.y = Math.atan2(player.group.position.x - start.x, player.group.position.z - start.z);
+  officer.startPos.copy(officer.group.position);
+  scene.add(officer.group);
+  buildingRaidState = {
+    loc,
+    officer,
+    phase: 'approach',
+    timer: 0,
+  };
+  const modeEl = document.getElementById('mode');
+  if (modeEl) modeEl.textContent = 'POLICE RAID';
+}
+
+function spawnPoliceTransportAtLocation(loc) {
+  const van = makePoliceVan();
+  const entrance = loc.entrance || locationReturnPos || player.group.position;
+  const road = nearestRoadPoint(entrance.x, entrance.z);
+  const yaw = Math.atan2(entrance.x - road.x, entrance.z - road.z);
+  van.group.position.set(road.x, 0, road.z);
+  van.group.rotation.y = yaw;
+  scene.add(van.group);
+  policeCars.push({
+    ...van,
+    kind: 'policeVan',
+    policeRole: 'transport',
+    velocity: 0,
+    health: 190,
+    sirenRed: van.sirenRed,
+    sirenBlue: van.sirenBlue,
+    bumpTimer: 0,
+  });
+  return policeCars[policeCars.length - 1];
+}
+
+function updatePoliceBuildingRaid(dt) {
+  if (!buildingRaidState) return;
+  if (!POLICE_ARRESTS_ENABLED) {
+    stopPoliceBuildingRaid();
+    return;
+  }
+  if (arrestState || jailTimer > 0 || activeLocation !== buildingRaidState.loc) {
+    stopPoliceBuildingRaid();
+    return;
+  }
+
+  const raid = buildingRaidState;
+  raid.timer += dt;
+  const officer = raid.officer;
+
+  if (raid.phase === 'approach') {
+    const dx = player.group.position.x - officer.group.position.x;
+    const dz = player.group.position.z - officer.group.position.z;
+    const dist = Math.max(0.001, Math.hypot(dx, dz));
+    const speed = raid.timer < 0.6 ? 0 : 5.8;
+
+    if (speed > 0 && dist > 1.45) {
+      const nx = officer.group.position.x + dx / dist * speed * dt;
+      const nz = officer.group.position.z + dz / dist * speed * dt;
+      officer.group.position.set(nx, 0, nz);
+      officer.group.rotation.y = Math.atan2(dx, dz);
+      setOfficerPose(officer, true, dt);
+    } else {
+      setOfficerPose(officer, false, dt);
+    }
+
+    if (dist < 1.55 || raid.timer > 8.5) {
+      raid.phase = 'cuffInside';
+      raid.timer = 0;
+      raid.playerStart = player.group.position.clone();
+      raid.officerStart = officer.group.position.clone();
+      player.velocityY = 0;
+      player.knockTimer = 0;
+      keys['KeyW'] = keys['KeyA'] = keys['KeyS'] = keys['KeyD'] = keys['Space'] = false;
+      document.getElementById('mode').textContent = 'CUFFED';
+    }
+    return;
+  }
+
+  if (raid.phase === 'cuffInside') {
+    const t = Math.min(1, raid.timer / 1.3);
+    const standX = raid.playerStart.x;
+    const standZ = raid.playerStart.z;
+    player.group.position.set(standX, 0, standZ);
+    player.yaw = officer.group.rotation.y + Math.PI;
+    player.group.rotation.y = player.yaw;
+    player.body.rotation.x = 0.2;
+    player.head.rotation.x = 0.08;
+    setPlayerCuffed(true);
+
+    officer.group.position.set(
+      raid.officerStart.x + (standX - raid.officerStart.x) * t,
+      0,
+      raid.officerStart.z + (standZ - 0.75 - raid.officerStart.z) * t
+    );
+    officer.group.rotation.y = Math.atan2(standX - officer.group.position.x, standZ - officer.group.position.z);
+    officer.leftArm.rotation.x = -0.9 * t;
+    officer.rightArm.rotation.x = -0.9 * t;
+
+    if (raid.timer > 1.45) {
+      raid.phase = 'escortOut';
+      raid.timer = 0;
+      raid.playerStart = player.group.position.clone();
+      raid.officerStart = officer.group.position.clone();
+      raid.playerExit = raid.loc.exitPos || raid.loc.insidePos || player.group.position;
+      raid.officerExit = new Vector3(raid.playerExit.x - 0.75, 0, raid.playerExit.z - 0.6);
+      document.getElementById('mode').textContent = 'ESCORTED';
+    }
+    return;
+  }
+
+  if (raid.phase === 'escortOut') {
+    const t = Math.min(1, raid.timer / 2.4);
+    player.group.position.set(
+      raid.playerStart.x + (raid.playerExit.x - raid.playerStart.x) * t,
+      0,
+      raid.playerStart.z + (raid.playerExit.z - raid.playerStart.z) * t
+    );
+    player.yaw = Math.atan2(raid.playerExit.x - raid.playerStart.x, raid.playerExit.z - raid.playerStart.z);
+    player.group.rotation.y = player.yaw;
+    setPlayerCuffed(true);
+
+    officer.group.position.set(
+      raid.officerStart.x + (raid.officerExit.x - raid.officerStart.x) * t,
+      0,
+      raid.officerStart.z + (raid.officerExit.z - raid.officerStart.z) * t
+    );
+    officer.group.rotation.y = player.yaw;
+    officer.leftArm.rotation.x = -0.95;
+    officer.rightArm.rotation.x = -0.75;
+    setOfficerPose(officer, true, dt);
+
+    if (t >= 1) {
+      const loc = raid.loc;
+      scene.remove(officer.group);
+      buildingRaidState = null;
+      activeLocation = null;
+      player.group.position.set(loc.entrance.x, 0, loc.entrance.z + 1.2);
+      locationReturnPos.copy(loc.entrance);
+      const transport = spawnPoliceTransportAtLocation(loc);
+      beginArrest(transport);
+    }
+  }
+}
+
 function beginArrest(policeCar) {
+  if (!POLICE_ARRESTS_ENABLED) return;
   if (arrestState || jailTimer > 0) return;
   const station = getLocationById('police');
   if (!station) return;
@@ -1075,8 +1548,9 @@ function updateArrest(dt) {
   }
 
   const target = a.station.entrance;
-  const dx = target.x - a.car.group.position.x;
-  const dz = target.z - a.car.group.position.z;
+  const roadTarget = getRoadGuidedTarget(a.car.group.position.x, a.car.group.position.z, target.x, target.z);
+  const dx = roadTarget.x - a.car.group.position.x;
+  const dz = roadTarget.z - a.car.group.position.z;
   const dist = Math.max(0.001, Math.hypot(dx, dz));
   const desiredYaw = Math.atan2(dx, dz);
   let diff = desiredYaw - a.car.group.rotation.y;
@@ -1087,11 +1561,14 @@ function updateArrest(dt) {
   a.car.velocity += (transportSpeed - a.car.velocity) * dt * 1.2;
   const dirX = Math.sin(a.car.group.rotation.y);
   const dirZ = Math.cos(a.car.group.rotation.y);
-  a.car.group.position.x += dirX * a.car.velocity * dt;
-  a.car.group.position.z += dirZ * a.car.velocity * dt;
+  let nx = a.car.group.position.x + dirX * a.car.velocity * dt;
+  let nz = a.car.group.position.z + dirZ * a.car.velocity * dt;
+  [nx, nz] = resolveCollision(a.car.group.position.x, a.car.group.position.z, nx, nz, 1.5);
+  a.car.group.position.x = nx;
+  a.car.group.position.z = nz;
   for (const w of a.car.wheels) w.rotation.x += a.car.velocity * dt * 1.8;
 
-  if (dist < 5 || a.timer > 18) {
+  if (Math.hypot(target.x - a.car.group.position.x, target.z - a.car.group.position.z) < 5 || a.timer > 22) {
     enterJailCell(a.station);
   }
 }
@@ -1143,37 +1620,55 @@ function updateJail(dt) {
     const cell = station.jailCellPos;
     const dx = player.group.position.x - cell.x;
     const dz = player.group.position.z - cell.z;
-    if (Math.hypot(dx, dz) > 4) player.group.position.set(cell.x, 0, cell.z);
+    if (station.jailCellBounds) {
+      player.group.position.x = MathUtils.clamp(player.group.position.x, station.jailCellBounds.minX, station.jailCellBounds.maxX);
+      player.group.position.z = MathUtils.clamp(player.group.position.z, station.jailCellBounds.minZ, station.jailCellBounds.maxZ);
+    } else if (Math.hypot(dx, dz) > 4) {
+      player.group.position.set(cell.x, 0, cell.z);
+    }
   }
   if (jailTimer <= 0 && station) {
     const out = station.releasePos || station.exitPos || station.entrance;
     player.group.position.set(out.x, 0, out.z);
-    activeLocation = null;
+    activeLocation = station;
     activeMission = null;
-    document.getElementById('mode').textContent = 'RELEASED';
+    locationReturnPos.copy(station.entrance);
+    player.heldItem.visible = true;
+    document.getElementById('mode').textContent = 'POLICE STATION';
   }
 }
 
 function updatePoliceChase(dt) {
   if (arrestState || jailTimer > 0) return;
-  if (wantedLevel <= 0) return;
-  while (policeCars.length < Math.min(3, wantedLevel)) spawnPoliceCar();
+  if (wantedLevel <= 0 && policeCars.length < 1) spawnPoliceCar();
+  if (wantedLevel > 0) while (policeCars.length < Math.min(3, wantedLevel)) spawnPoliceCar();
+  if (policeCars.length <= 0) return;
   const target = getPlayerRefObject();
   const targetSpeed = inVehicle ? Math.abs(inVehicle.velocity || 0) : ((keys['ShiftLeft'] || keys['ShiftRight']) ? 8.5 : 4.2);
 
   for (const car of policeCars) {
+    const pulse = wantedLevel > 0 && Math.sin(performance.now() * 0.018) > 0;
+    car.sirenRed.visible = pulse;
+    car.sirenBlue.visible = wantedLevel > 0 && !pulse;
+
+    if (wantedLevel <= 0) {
+      if (!car.patrolTarget || Math.hypot(car.patrolTarget.x - car.group.position.x, car.patrolTarget.z - car.group.position.z) < 5) {
+        car.patrolTarget = getPoliceRoadPatrolTarget(car);
+      }
+      drivePoliceCarToward(car, car.patrolTarget, dt, car.kind === 'policeVan' ? 8 : 9.5, car.kind === 'policeVan' ? 1.0 : 1.2);
+      continue;
+    }
+
     let dx = target.position.x - car.group.position.x;
     let dz = target.position.z - car.group.position.z;
     const dist = Math.max(0.001, Math.hypot(dx, dz));
-    if (dist > 115) {
+    if (dist > 150) {
       const rearYaw = inVehicle ? inVehicle.group.rotation.y + Math.PI : player.yaw + Math.PI;
-      car.group.position.set(
-        target.position.x + Math.sin(rearYaw) * 34 + (Math.random() - 0.5) * 8,
-        0,
-        target.position.z + Math.cos(rearYaw) * 34 + (Math.random() - 0.5) * 8
-      );
+      const spawnPoint = nearestRoadPoint(target.position.x + Math.sin(rearYaw) * 48, target.position.z + Math.cos(rearYaw) * 48);
+      car.group.position.set(spawnPoint.x, 0, spawnPoint.z);
       car.group.rotation.y = rearYaw + Math.PI;
-      car.velocity = Math.max(car.velocity, 16);
+      car.velocity = Math.min(Math.max(car.velocity, 8), 12);
+      car.patrolTarget = null;
     }
 
     const lead = MathUtils.clamp(dist / 38, 0.25, 2.2);
@@ -1186,41 +1681,21 @@ function updatePoliceChase(dt) {
       leadX += Math.sin(player.yaw) * targetSpeed * lead * 0.45;
       leadZ += Math.cos(player.yaw) * targetSpeed * lead * 0.45;
     }
-    dx = leadX - car.group.position.x;
-    dz = leadZ - car.group.position.z;
-    const desiredYaw = Math.atan2(dx, dz);
-    let diff = desiredYaw - car.group.rotation.y;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    const turn = car.kind === 'policeVan' ? 1.9 : 2.55;
-    car.group.rotation.y += Math.max(-turn * dt, Math.min(turn * dt, diff));
-    const escapeBoost = inVehicle ? Math.min(14, targetSpeed * 0.45) : Math.min(5, targetSpeed * 0.35);
-    const chaseTopSpeed = (car.kind === 'policeVan' ? wantedLevel * 3 + 15 : wantedLevel * 4 + 17) + escapeBoost;
-    car.velocity += (chaseTopSpeed - car.velocity) * dt * (dist > 45 ? 1.45 : 0.92);
-    const dirX = Math.sin(car.group.rotation.y);
-    const dirZ = Math.cos(car.group.rotation.y);
-    let nx = car.group.position.x + dirX * car.velocity * dt;
-    let nz = car.group.position.z + dirZ * car.velocity * dt;
-    [nx, nz] = resolveCollision(car.group.position.x, car.group.position.z, nx, nz, 1.3);
-    car.group.position.x = nx;
-    car.group.position.z = nz;
-    for (const w of car.wheels) w.rotation.x += car.velocity * dt * 1.8;
-    const pulse = Math.sin(performance.now() * 0.018) > 0;
-    car.sirenRed.visible = pulse;
-    car.sirenBlue.visible = !pulse;
+    const roadTarget = getRoadGuidedTarget(car.group.position.x, car.group.position.z, leadX, leadZ);
+    const escapeBoost = inVehicle ? Math.min(7, targetSpeed * 0.25) : Math.min(2.5, targetSpeed * 0.2);
+    const chaseTopSpeed = (car.kind === 'policeVan' ? wantedLevel * 1.8 + 10 : wantedLevel * 2.2 + 12) + escapeBoost;
+    const holdDistance = inVehicle ? 11 : 7;
+    drivePoliceCarToward(car, roadTarget, dt, dist < holdDistance ? 0 : chaseTopSpeed, car.kind === 'policeVan' ? 1.15 : 1.45);
 
     car.bumpTimer = Math.max(0, car.bumpTimer - dt);
-    if (dist < 3.1 && car.bumpTimer <= 0) {
+    if (dist < 3.1 && car.bumpTimer <= 0 && wantedLevel >= 3) {
       car.bumpTimer = 0.8;
       if (inVehicle) {
-        damageVehicle(inVehicle, 14 + wantedLevel * 4);
-        if (wantedLevel >= 3 && inVehicle.health <= 20) beginArrest(car);
+        damageVehicle(inVehicle, 5 + wantedLevel * 2);
       }
-      else if (wantedLevel >= 2) beginArrest(car);
-      else triggerLocationAlert('WANTED');
-    }
-    if (!inVehicle && wantedLevel >= 3 && dist < 2.2) {
-      beginArrest(car);
+      else {
+        triggerLocationAlert('WANTED');
+      }
     }
   }
 }
@@ -1282,22 +1757,24 @@ function applyHitToNearestTarget(range, arc, damage, knock) {
   const dist = Math.max(0.001, Math.hypot(dx, dz));
   if (targetType === 'ped') {
     damagePed(target, damage, dx / dist * knock, dz / dist * knock);
-    reportCrime(player.heldType === 'gun' ? 2 : 1, 'ASSAULT');
+    if (player.heldType === 'gun') {
+      reportCrime(2, 'ASSAULT');
+    }
   } else {
     if (targetType === 'vehicle') {
       damageVehicle(target, damage * 0.75);
       target.group.position.x += dx / dist * knock * 0.45;
       target.group.position.z += dz / dist * knock * 0.45;
       spawnSparkBurst(target.group.position.x, 0.8, target.group.position.z, player.heldType === 'gun' ? 1.25 : 0.8);
-      reportCrime(player.heldType === 'gun' ? 2 : 1, 'VEHICLE ATTACK');
       return true;
     }
     target.group.position.x += dx / dist * knock;
     target.group.position.z += dz / dist * knock;
     target.hitTimer = 0.28;
-    reportCrime(player.heldType === 'gun' ? 2 : 1, 'ASSAULT');
+    if (player.heldType === 'gun') {
+      reportCrime(2, 'ASSAULT');
+    }
   }
-  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
   return true;
 }
 
@@ -1334,8 +1811,6 @@ function damageTargetsNearPoint(x, z, radius, damage, knock) {
     spawnSparkBurst(vehicle.group.position.x, 0.8, vehicle.group.position.z, 1.1);
     hit = true;
   }
-  if (hit) reportCrime(1, 'ATTACK');
-  if (hit && isNearSensitiveLocation(x, z)) triggerLocationAlert('WANTED');
   return hit;
 }
 
@@ -1437,7 +1912,11 @@ function performPlayerAttack() {
   if (player.heldType === 'gun') {
     spawnMuzzleFlash();
     const hit = applyHitToNearestTarget(16, 0.72, 44, 1.25);
-    if (!hit) reportCrime(2, 'SHOTS FIRED');
+    if (activeLocation) {
+      reportCrime(hit ? 1 : 2, 'SHOTS FIRED');
+    } else if (!hit) {
+      reportCrime(2, 'SHOTS FIRED');
+    }
   } else if (player.heldType === 'object') {
     throwHeldObject();
     applyHitToNearestTarget(4.8, 0.58, 26, 0.75);
@@ -1548,7 +2027,6 @@ function knockPlayerByVehicle(knockX, knockZ, power = 1) {
   player.onGround = false;
   player.actionTimer = 0.34;
   player.group.rotation.z = Math.sign(knockX || 1) * 0.65;
-  triggerLocationAlert('WANTED');
 }
 
 function hitNearbyPed() {
@@ -1654,7 +2132,7 @@ function updatePlayer(dt) {
   if (keys['Digit2']) setHeldItem('object');
   if (keys['Digit0']) setHeldItem('empty');
   if (keys['KeyE'] && !ePressedLast) {
-    if (!tryBankVaultInteraction()) performPlayerAttack();
+    if (!tryInteriorObjectInteraction() && !tryBankVaultInteraction()) performPlayerAttack();
   }
   ePressedLast = !!keys['KeyE'];
 
@@ -1714,8 +2192,48 @@ function updatePlayer(dt) {
   updatePlayerActionPose(moving, sprint, dt);
 }
 
+function ramPedsWithPlayerVehicle(veh, dt) {
+  const speed = Math.abs(veh.velocity || 0);
+  if (speed < 7) return;
+
+  const dirSign = veh.velocity >= 0 ? 1 : -1;
+  const dirX = Math.sin(veh.group.rotation.y) * dirSign;
+  const dirZ = Math.cos(veh.group.rotation.y) * dirSign;
+  const hitRadius = veh.kind === 'bike' ? 1.45 : (veh.kind === 'truck' || veh.kind === 'policeVan' ? 2.45 : 1.95);
+  const hitPower = MathUtils.clamp(speed / 12, 0.8, 2.8);
+
+  for (const ped of peds) {
+    ped.vehicleHitCooldown = Math.max(0, (ped.vehicleHitCooldown || 0) - dt);
+    if (ped.downTimer > 0 || ped.vehicleHitCooldown > 0) continue;
+
+    const dx = ped.group.position.x - veh.group.position.x;
+    const dz = ped.group.position.z - veh.group.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > hitRadius) continue;
+
+    const frontDot = dist > 0.001 ? (dx / dist) * dirX + (dz / dist) * dirZ : 1;
+    if (frontDot < -0.25) continue;
+
+    const sideKickX = dist > 0.001 ? dx / dist * 1.4 : 0;
+    const sideKickZ = dist > 0.001 ? dz / dist * 1.4 : 0;
+    damagePed(ped, 70, dirX * 1.8 * hitPower + sideKickX, dirZ * 1.8 * hitPower + sideKickZ);
+    ped.knockTimer = 0.86;
+    ped.knockVx = dirX * 9.5 * hitPower + sideKickX;
+    ped.knockVz = dirZ * 9.5 * hitPower + sideKickZ;
+    ped.knockVY = 5.8 * hitPower;
+    ped.downTimer = Math.max(ped.downTimer, 2.4);
+    ped.group.rotation.z = Math.PI / 2;
+    ped.vehicleHitCooldown = 1.2;
+    spawnImpactDust(ped.group.position.x, ped.group.position.z);
+    spawnSparkBurst(ped.group.position.x, 0.65, ped.group.position.z, MathUtils.clamp(hitPower, 0.8, 1.8));
+    damageVehicle(veh, veh.kind === 'bike' ? 4 : 2.5);
+    veh.velocity *= veh.kind === 'bike' ? 0.72 : 0.86;
+  }
+}
+
 function updateVehicle(dt, veh) {
   ensureVehicleDamageState(veh);
+  ensureVehicleFuelState(veh);
   // Acceleration / braking
   const throttle = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
@@ -1723,8 +2241,9 @@ function updateVehicle(dt, veh) {
   const isHeavy = veh.kind === 'truck' || veh.kind === 'policeVan';
   const isPickup = veh.kind === 'pickup';
   const damageLimit = Math.max(0.45, veh.health / 100);
+  const fuelLimit = veh.fuel <= 0 ? 0.25 : MathUtils.clamp(veh.fuel / 18, 0.35, 1);
   const maxBase = isBike ? (sprint ? 46 : 28) : (isHeavy ? (sprint ? 28 : 18) : (isPickup ? (sprint ? 34 : 22) : (sprint ? 38 : 22)));
-  const maxSpeed = maxBase * damageLimit;
+  const maxSpeed = maxBase * damageLimit * fuelLimit;
   const accel = isBike ? 18 : (isHeavy ? 9 : 14);
   const decel = isBike ? 7.5 : (isHeavy ? 4.5 : 6);
   if (throttle > 0) veh.velocity += accel * dt;
@@ -1740,6 +2259,7 @@ function updateVehicle(dt, veh) {
     else veh.velocity = Math.min(0, veh.velocity + 22 * dt);
   }
   veh.velocity = Math.max(-maxSpeed / 2, Math.min(maxSpeed, veh.velocity));
+  if (Math.abs(veh.velocity) > 0.5) veh.fuel = Math.max(0, veh.fuel - Math.abs(veh.velocity) * dt * 0.012);
 
   // Steering: A=left, D=right
   const steer = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
@@ -1766,6 +2286,7 @@ function updateVehicle(dt, veh) {
   }
   veh.group.position.x = nx;
   veh.group.position.z = nz;
+  ramPedsWithPlayerVehicle(veh, dt);
 
   // Spin wheels visually
   for (const w of veh.wheels) {

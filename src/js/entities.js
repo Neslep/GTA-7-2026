@@ -232,13 +232,52 @@ function makeMotorbike(color = 0xff7030) {
 const vehicles = [];
 const carColors = [0xe83030, 0x2080ff, 0xffd200, 0x10b070, 0xff7030, 0xa040c0, 0xf0f0f0, 0x202028];
 const bikeColors = [0xff3030, 0xffd200, 0x2080ff, 0x10b070, 0xf0f0f0];
-const PARKED = 18;
+const parkingSlotQueue = [...parkingSlots];
+function nudgeParkingSlotOffRoad(slot, kind = 'car') {
+  if (!slot || !isOnRoad(slot.x, slot.z, kind === 'bike' ? 1.1 : 1.5)) return slot;
+  const next = { ...slot };
+  const nearestRoad = value => -HALF + MathUtils.clamp(Math.round((value + HALF) / BLOCK), 0, GRID) * BLOCK;
+  const rx = nearestRoad(next.x);
+  const rz = nearestRoad(next.z);
+  const minGap = ROAD / 2 + (kind === 'bike' ? 2.4 : 3.0);
+  const dx = next.x - rx;
+  const dz = next.z - rz;
+  if (Math.abs(dx) < Math.abs(dz)) {
+    next.x = rx + (dx >= 0 ? minGap : -minGap);
+  } else {
+    next.z = rz + (dz >= 0 ? minGap : -minGap);
+  }
+  return next;
+}
+
+function takeParkingSlot(kind = 'car') {
+  let idx = parkingSlotQueue.findIndex(slot => slot.kind === kind);
+  if (kind === 'bike') {
+    const matches = [];
+    for (let i = 0; i < parkingSlotQueue.length; i++) {
+      if (parkingSlotQueue[i].kind === 'bike') matches.push(i);
+    }
+    if (matches.length) idx = matches[Math.floor(Math.random() * matches.length)];
+  }
+  if (idx === -1) idx = parkingSlotQueue.findIndex(slot => slot.kind === 'car');
+  if (idx === -1) return null;
+  return parkingSlotQueue.splice(idx, 1)[0];
+}
+
+const PARKED = parkingSlots.filter(slot => slot.kind === 'car').length;
 for (let i = 0; i < PARKED; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const roll = Math.random();
-  const car = roll < 0.56 ? makeCar(col) : (roll < 0.84 ? makePickup(col) : makeTruck(col));
+  const car = roll < 0.7 ? makeCar(col) : makePickup(col);
+  const slot = takeParkingSlot('car');
   // Try to place on a side street area
   let placed = false, tries = 0;
+  if (slot) {
+    const safeSlot = nudgeParkingSlotOffRoad(slot, 'car');
+    car.group.position.set(safeSlot.x, 0, safeSlot.z);
+    car.group.rotation.y = slot.rotation + (Math.random() - 0.5) * 0.04;
+    placed = true;
+  }
   while (!placed && tries < 50) {
     tries++;
     const bx = Math.floor(Math.random() * GRID);
@@ -265,6 +304,7 @@ for (let i = 0; i < PARKED; i++) {
     isAI: false,
     kind: car.kind || 'car',
     occupied: false,
+    parkedInLot: !!slot && !!slot.parkedInLot,
   });
 }
 
@@ -272,7 +312,14 @@ const PARKED_BIKES = 10;
 for (let i = 0; i < PARKED_BIKES; i++) {
   const col = bikeColors[Math.floor(Math.random()*bikeColors.length)];
   const bike = makeMotorbike(col);
+  const slot = takeParkingSlot('bike');
   let placed = false, tries = 0;
+  if (slot) {
+    const safeSlot = nudgeParkingSlotOffRoad(slot, 'bike');
+    bike.group.position.set(safeSlot.x, 0, safeSlot.z);
+    bike.group.rotation.y = slot.rotation + (Math.random() - 0.5) * 0.08;
+    placed = true;
+  }
   while (!placed && tries < 50) {
     tries++;
     const bx = Math.floor(Math.random() * GRID);
@@ -297,22 +344,36 @@ for (let i = 0; i < PARKED_BIKES; i++) {
     angularVelocity: 0,
     isAI: false,
     occupied: false,
+    parkedInLot: !!slot && !!slot.parkedInLot,
   });
 }
 
 // -------------------- AI TRAFFIC --------------------
 const aiCars = [];
 const TRAFFIC_COUNT = 16;
+const trafficLaneSlots = new Set();
 for (let i = 0; i < TRAFFIC_COUNT; i++) {
   const col = carColors[Math.floor(Math.random()*carColors.length)];
   const roll = Math.random();
   const car = roll < 0.6 ? makeCar(col) : (roll < 0.86 ? makePickup(col) : makeTruck(col));
   scene.add(car.group);
   // Pick a road lane to drive on
-  const horizontal = Math.random() < 0.5;
-  const laneIndex = Math.floor(Math.random() * (GRID + 1));
-  const direction = Math.random() < 0.5 ? 1 : -1;
-  const laneOff = direction * (ROAD/4);
+  let horizontal = Math.random() < 0.5;
+  let laneIndex = Math.floor(Math.random() * (GRID + 1));
+  let direction = Math.random() < 0.5 ? 1 : -1;
+  let laneSub = Math.floor(Math.random() * 2);
+  let laneKey = `${horizontal ? 'h' : 'v'}:${laneIndex}:${direction}:${laneSub}`;
+  let laneTries = 0;
+  while (trafficLaneSlots.has(laneKey) && laneTries < 12) {
+    laneTries++;
+    horizontal = Math.random() < 0.5;
+    laneIndex = Math.floor(Math.random() * (GRID + 1));
+    direction = Math.random() < 0.5 ? 1 : -1;
+    laneSub = Math.floor(Math.random() * 2);
+    laneKey = `${horizontal ? 'h' : 'v'}:${laneIndex}:${direction}:${laneSub}`;
+  }
+  trafficLaneSlots.add(laneKey);
+  const laneOff = direction * (ROAD * (laneSub === 0 ? 0.17 : 0.33));
   const startPos = -HALF + Math.random() * GRID * BLOCK;
   if (horizontal) {
     car.group.position.set(startPos, 0, -HALF + laneIndex * BLOCK + laneOff);
