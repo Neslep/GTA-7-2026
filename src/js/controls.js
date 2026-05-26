@@ -160,12 +160,12 @@ document.querySelectorAll('[data-touch-key]').forEach(button => {
   button.addEventListener('contextmenu', e => e.preventDefault());
 });
 
-function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false) {
+function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false, canUseLocation = false, locationLabel = 'ENTER') {
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
   mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
   mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
-  mobileCarBtn.textContent = driving ? 'EXIT' : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR'));
-  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle);
+  mobileCarBtn.textContent = driving ? 'EXIT' : (canUseLocation ? locationLabel : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR')));
+  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle || canUseLocation);
 }
 
 addEventListener('blur', () => {
@@ -185,8 +185,28 @@ const camPitch = { v: 0.15 };
 let inVehicle = null;       // reference to vehicle object when driving
 let nearestVehicle = null;  // for prompt
 let nearestTrafficVehicle = null; // running AI traffic car available for hijack
+let nearestLocation = null; // interactive city landmark
+let nearestMissionStart = null;
+let nearestServiceLocation = null;
+let activeLocation = null;  // player is inside this landmark interior
+let locationReturnPos = new Vector3();
+let wantedLevel = 0;
+let alertTimer = 0;
+let activeMission = null;
+let missionTarget = null;
+let missionTimer = 0;
+let missionReward = 0;
+let missionStatusTimer = 0;
+let bankAlarm = false;
+let bankAlarmTimer = 0;
+let policeCars = [];
 let distanceTraveled = 0;
 let lastPos = new Vector3();
+
+const missionCatalog = [
+  { id: 'bank-delivery', name: 'Bank Delivery', startId: 'bank', targetId: 'garage', seconds: 70, reward: 1200, objective: 'Deliver the bank package to the garage.' },
+  { id: 'club-pickup', name: 'Club Pickup', startId: 'nightclub', targetId: 'shop', seconds: 65, reward: 850, objective: 'Pick up the club parcel and reach the shop.' },
+];
 
 // -------------------- COLLISION HELPER --------------------
 function collidesAt(x, z, radius = 0.6) {
@@ -204,6 +224,381 @@ function resolveCollision(curX, curZ, newX, newZ, radius = 0.6) {
   if (!collidesAt(newX, curZ, radius)) return [newX, curZ];
   if (!collidesAt(curX, newZ, radius)) return [curX, newZ];
   return [curX, curZ];
+}
+
+// -------------------- LOCATION INTERACTION STATE --------------------
+function findNearestLocation() {
+  if (inVehicle || activeLocation) return null;
+  let nearest = null;
+  let best = 6.5;
+  for (const loc of cityLocations) {
+    const dx = loc.entrance.x - player.group.position.x;
+    const dz = loc.entrance.z - player.group.position.z;
+    const d = Math.hypot(dx, dz);
+    if (d < best) {
+      best = d;
+      nearest = loc;
+    }
+  }
+  return nearest;
+}
+
+function getLocationById(id) {
+  return cityLocations.find(loc => loc.id === id);
+}
+
+function getPlayerRefObject() {
+  return inVehicle ? inVehicle.group : player.group;
+}
+
+function getPlayerRefPosition() {
+  return getPlayerRefObject().position;
+}
+
+function distanceToLocation(loc) {
+  const ref = getPlayerRefPosition();
+  return Math.hypot(loc.entrance.x - ref.x, loc.entrance.z - ref.z);
+}
+
+function findMissionStart() {
+  if (activeMission || inVehicle || !activeLocation) return null;
+  for (const mission of missionCatalog) {
+    const start = getLocationById(mission.startId);
+    if (start && activeLocation.id === start.id) return mission;
+  }
+  return null;
+}
+
+function startMission(missionDef) {
+  if (!missionDef) return;
+  const target = getLocationById(missionDef.targetId);
+  if (!target) return;
+  activeMission = {
+    ...missionDef,
+    status: 'active',
+    statusText: missionDef.objective,
+  };
+  missionTarget = target;
+  missionTimer = missionDef.seconds;
+  missionReward = missionDef.reward;
+  missionStatusTimer = 0;
+  document.getElementById('mode').textContent = 'MISSION';
+}
+
+function completeMission(text = 'MISSION COMPLETE') {
+  if (!activeMission) return;
+  if (activeMission.id === 'bank-alarm' || activeMission.id === 'escape-heat') {
+    bankAlarm = false;
+    setWantedLevel(0);
+  }
+  activeMission.status = 'complete';
+  activeMission.statusText = `${text} +$${missionReward}`;
+  missionStatusTimer = 3.5;
+  missionTarget = null;
+  missionTimer = 0;
+  if (!inVehicle && !activeLocation) document.getElementById('mode').textContent = wantedLevel > 0 ? 'WANTED' : 'ON FOOT';
+}
+
+function failMission(text = 'MISSION FAILED') {
+  if (!activeMission) return;
+  activeMission.status = 'failed';
+  activeMission.statusText = text;
+  missionStatusTimer = 3.5;
+  missionTarget = null;
+  missionTimer = 0;
+}
+
+function startEscapeHeatMission() {
+  if (activeMission && activeMission.id === 'escape-heat' && activeMission.status === 'active') return;
+  const garage = getLocationById('garage');
+  const gas = getLocationById('gas');
+  activeMission = {
+    id: 'escape-heat',
+    name: 'Escape Heat',
+    status: 'active',
+    statusText: 'Reach GAS or GARAGE to cool down.',
+  };
+  missionTarget = distanceToLocation(garage) < distanceToLocation(gas) ? garage : gas;
+  missionTimer = 90;
+  missionReward = 500;
+}
+
+function updateMission(dt) {
+  if (!activeMission) return;
+
+  if (activeMission.status !== 'active') {
+    missionStatusTimer -= dt;
+    if (missionStatusTimer <= 0) activeMission = null;
+    return;
+  }
+
+  missionTimer = Math.max(0, missionTimer - dt);
+  if (missionTimer <= 0) {
+    failMission('TIME EXPIRED');
+    return;
+  }
+
+  if (activeMission.id === 'escape-heat') {
+    const gas = getLocationById('gas');
+    const garage = getLocationById('garage');
+    if ((gas && distanceToLocation(gas) < 7) || (garage && distanceToLocation(garage) < 7)) {
+      setWantedLevel(0);
+      bankAlarm = false;
+      completeMission('HEAT LOST');
+    } else if (missionTarget && distanceToLocation(missionTarget) > 75) {
+      missionTarget = distanceToLocation(garage) < distanceToLocation(gas) ? garage : gas;
+    }
+    return;
+  }
+
+  if (missionTarget && distanceToLocation(missionTarget) < 7) completeMission();
+}
+
+function setWantedLevel(level) {
+  const next = Math.max(0, Math.min(5, Math.floor(level)));
+  wantedLevel = next;
+  alertTimer = next > 0 ? 99 : 0;
+  if (next > 0) {
+    document.getElementById('mode').textContent = 'WANTED';
+    spawnPoliceCar();
+    startEscapeHeatMission();
+  } else if (!inVehicle && !activeLocation) {
+    document.getElementById('mode').textContent = 'ON FOOT';
+  }
+}
+
+function enterLocation(loc) {
+  if (!loc || inVehicle) return;
+  locationReturnPos.copy(loc.entrance);
+  activeLocation = loc;
+  player.group.position.set(loc.insidePos.x, 0, loc.insidePos.z + 5);
+  player.velocityY = 0;
+  player.onGround = true;
+  player.group.rotation.z = 0;
+  player.heldItem.visible = true;
+  nearestLocation = null;
+  camYaw.v = 0;
+  camPitch.v = 0.12;
+  document.getElementById('mode').textContent = loc.type === 'bar' ? 'IN BAR' : `IN ${loc.label}`;
+}
+
+function exitLocation() {
+  if (!activeLocation) return;
+  player.group.position.set(locationReturnPos.x, 0, locationReturnPos.z + 1.6);
+  player.velocityY = 0;
+  player.onGround = true;
+  activeLocation = null;
+  document.getElementById('mode').textContent = 'ON FOOT';
+}
+
+function triggerLocationAlert(reason = 'ALERT') {
+  setWantedLevel(Math.max(wantedLevel + 1, 2));
+  const modeEl = document.getElementById('mode');
+  if (modeEl && !inVehicle) modeEl.textContent = reason;
+}
+
+function triggerBankAlarm() {
+  if (bankAlarm) return;
+  bankAlarm = true;
+  bankAlarmTimer = 55;
+  setWantedLevel(Math.max(wantedLevel, 3));
+  activeMission = {
+    id: 'bank-alarm',
+    name: 'Bank Alarm',
+    status: 'active',
+    statusText: 'Escape the bank and reach GAS or GARAGE.',
+  };
+  missionTarget = getLocationById('garage');
+  missionTimer = 80;
+  missionReward = 0;
+  document.getElementById('mode').textContent = 'BANK ALARM';
+}
+
+function tryBankVaultInteraction() {
+  if (!activeLocation || activeLocation.type !== 'bank' || !activeLocation.vaultPos) return false;
+  const d = Math.hypot(player.group.position.x - activeLocation.vaultPos.x, player.group.position.z - activeLocation.vaultPos.z);
+  if (d > 3.5) return false;
+  triggerBankAlarm();
+  return true;
+}
+
+function isNearSensitiveLocation(x, z) {
+  if (activeLocation && (activeLocation.type === 'bank' || activeLocation.type === 'police')) return true;
+  for (const loc of cityLocations) {
+    if (loc.type !== 'bank' && loc.type !== 'police') continue;
+    if (Math.hypot(loc.entrance.x - x, loc.entrance.z - z) < loc.alertRadius) return true;
+  }
+  return false;
+}
+
+function hitNearbySceneActor() {
+  const attackRange = player.heldType === 'gun' ? 9 : 2.2;
+  const attackArc = player.heldType === 'gun' ? 0.55 : 0.35;
+  let target = null;
+  let best = attackRange;
+  const px = player.group.position.x;
+  const pz = player.group.position.z;
+  const fx = Math.sin(player.yaw);
+  const fz = Math.cos(player.yaw);
+
+  for (const actor of citySceneActors) {
+    const dx = actor.group.position.x - px;
+    const dz = actor.group.position.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist > best || dist < 0.001) continue;
+    const dot = (dx / dist) * fx + (dz / dist) * fz;
+    if (dot < attackArc) continue;
+    best = dist;
+    target = actor;
+  }
+
+  if (!target) return false;
+  const dx = target.group.position.x - px;
+  const dz = target.group.position.z - pz;
+  const dist = Math.max(0.001, Math.hypot(dx, dz));
+  const knock = player.heldType === 'gun' ? 1.2 : 0.45;
+  target.group.position.x += dx / dist * knock;
+  target.group.position.z += dz / dist * knock;
+  target.hitTimer = 0.28;
+  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
+  return true;
+}
+
+function makeSmokeGroup() {
+  const smoke = new Group();
+  for (let i = 0; i < 5; i++) {
+    const puff = new Mesh(
+      new SphereGeometry(0.18 + i * 0.03, 8, 6),
+      new MeshBasicMaterial({ color: 0x777780, transparent: true, opacity: 0.26 })
+    );
+    puff.position.set((Math.random() - 0.5) * 0.8, 1.4 + i * 0.18, -1.2 - i * 0.08);
+    smoke.add(puff);
+  }
+  smoke.visible = false;
+  return smoke;
+}
+
+function ensureVehicleDamageState(veh) {
+  if (!veh) return;
+  if (typeof veh.health !== 'number') veh.health = 100;
+  if (!veh.smoke) {
+    veh.smoke = makeSmokeGroup();
+    veh.group.add(veh.smoke);
+  }
+}
+
+function damageVehicle(veh, amount) {
+  ensureVehicleDamageState(veh);
+  veh.health = Math.max(0, veh.health - amount);
+  if (veh.smoke) veh.smoke.visible = veh.health < 45;
+}
+
+function repairVehicleAtGarage(veh) {
+  if (!veh) return false;
+  ensureVehicleDamageState(veh);
+  veh.health = 100;
+  if (veh.smoke) veh.smoke.visible = false;
+  const palette = [0xe83030, 0x2080ff, 0xffd200, 0x10b070, 0xff7030, 0xa040c0, 0xf0f0f0];
+  const nextColor = palette[Math.floor(Math.random() * palette.length)];
+  if (veh.body && veh.body.material && veh.body.material.color) veh.body.material.color.set(nextColor);
+  veh.color = nextColor;
+  return true;
+}
+
+function findNearestServiceLocation() {
+  const ref = getPlayerRefPosition();
+  let nearest = null;
+  let best = 7;
+  for (const loc of cityLocations) {
+    if (loc.type !== 'garage' && loc.type !== 'gas' && loc.type !== 'shop') continue;
+    const d = Math.hypot(loc.entrance.x - ref.x, loc.entrance.z - ref.z);
+    if (d < best) {
+      best = d;
+      nearest = loc;
+    }
+  }
+  return nearest;
+}
+
+function useServiceLocation(loc) {
+  if (!loc) return false;
+  if (loc.type === 'garage' && inVehicle) {
+    repairVehicleAtGarage(inVehicle);
+    setWantedLevel(Math.max(0, wantedLevel - 2));
+    return true;
+  }
+  if (loc.type === 'gas' && inVehicle) {
+    ensureVehicleDamageState(inVehicle);
+    inVehicle.health = Math.min(100, inVehicle.health + 35);
+    if (inVehicle.smoke) inVehicle.smoke.visible = inVehicle.health < 45;
+    setWantedLevel(Math.max(0, wantedLevel - 1));
+    return true;
+  }
+  if (loc.type === 'shop' && !inVehicle) {
+    setHeldItem(player.heldType === 'gun' ? 'object' : 'gun');
+    return true;
+  }
+  return false;
+}
+
+function spawnPoliceCar() {
+  if (policeCars.length >= Math.min(3, Math.max(1, wantedLevel))) return;
+  const car = makeCar(0x102040);
+  const ref = getPlayerRefPosition();
+  const angle = Math.random() * Math.PI * 2;
+  car.group.position.set(ref.x + Math.sin(angle) * 38, 0, ref.z + Math.cos(angle) * 38);
+  car.group.rotation.y = angle + Math.PI;
+  const red = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0xff2020 }));
+  red.position.set(-0.35, 1.85, 0.1);
+  const blue = new Mesh(new BoxGeometry(0.35, 0.16, 0.22), new MeshBasicMaterial({ color: 0x2080ff }));
+  blue.position.set(0.35, 1.85, 0.1);
+  car.group.add(red, blue);
+  scene.add(car.group);
+  policeCars.push({
+    ...car,
+    kind: 'police',
+    velocity: 0,
+    health: 140,
+    sirenRed: red,
+    sirenBlue: blue,
+    bumpTimer: 0,
+  });
+}
+
+function updatePoliceChase(dt) {
+  if (wantedLevel <= 0) return;
+  while (policeCars.length < Math.min(3, wantedLevel)) spawnPoliceCar();
+  const target = getPlayerRefObject();
+
+  for (const car of policeCars) {
+    const dx = target.position.x - car.group.position.x;
+    const dz = target.position.z - car.group.position.z;
+    const dist = Math.max(0.001, Math.hypot(dx, dz));
+    const desiredYaw = Math.atan2(dx, dz);
+    let diff = desiredYaw - car.group.rotation.y;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    car.group.rotation.y += Math.max(-1.9 * dt, Math.min(1.9 * dt, diff));
+    car.velocity += (wantedLevel * 4 + 12 - car.velocity) * dt * 0.85;
+    const dirX = Math.sin(car.group.rotation.y);
+    const dirZ = Math.cos(car.group.rotation.y);
+    let nx = car.group.position.x + dirX * car.velocity * dt;
+    let nz = car.group.position.z + dirZ * car.velocity * dt;
+    [nx, nz] = resolveCollision(car.group.position.x, car.group.position.z, nx, nz, 1.3);
+    car.group.position.x = nx;
+    car.group.position.z = nz;
+    for (const w of car.wheels) w.rotation.x += car.velocity * dt * 1.8;
+    const pulse = Math.sin(performance.now() * 0.018) > 0;
+    car.sirenRed.visible = pulse;
+    car.sirenBlue.visible = !pulse;
+
+    car.bumpTimer = Math.max(0, car.bumpTimer - dt);
+    if (dist < 3.1 && car.bumpTimer <= 0) {
+      car.bumpTimer = 0.8;
+      if (inVehicle) damageVehicle(inVehicle, 14 + wantedLevel * 4);
+      else triggerLocationAlert('WANTED');
+    }
+  }
 }
 
 // -------------------- PLAYER ACTIONS --------------------
@@ -274,13 +669,17 @@ function hitNearbyPed() {
     target = ped;
   }
 
-  if (!target) return;
+  if (!target) {
+    hitNearbySceneActor();
+    return;
+  }
   const dx = target.group.position.x - px;
   const dz = target.group.position.z - pz;
   const dist = Math.max(0.001, Math.hypot(dx, dz));
   const power = player.heldType === 'gun' ? 38 : (player.heldType === 'object' ? 32 : 24);
   const knock = player.heldType === 'gun' ? 1.1 : 0.55;
   damagePed(target, power, dx / dist * knock, dz / dist * knock);
+  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
 }
 
 function updatePlayerActionPose(moving, sprint, dt) {
@@ -375,7 +774,7 @@ function updatePlayer(dt) {
   if (keys['Digit0']) setHeldItem('empty');
   if (keys['KeyE'] && !ePressedLast) {
     player.actionTimer = 0.28;
-    hitNearbyPed();
+    if (!tryBankVaultInteraction()) hitNearbyPed();
   }
   ePressedLast = !!keys['KeyE'];
 
@@ -424,11 +823,13 @@ function updatePlayer(dt) {
 }
 
 function updateVehicle(dt, veh) {
+  ensureVehicleDamageState(veh);
   // Acceleration / braking
   const throttle = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
   const isBike = veh.kind === 'bike';
-  const maxSpeed = isBike ? (sprint ? 46 : 28) : (sprint ? 38 : 22);
+  const damageLimit = Math.max(0.45, veh.health / 100);
+  const maxSpeed = (isBike ? (sprint ? 46 : 28) : (sprint ? 38 : 22)) * damageLimit;
   const accel = isBike ? 18 : 14;
   const decel = isBike ? 7.5 : 6;
   if (throttle > 0) veh.velocity += accel * dt;
@@ -465,6 +866,7 @@ function updateVehicle(dt, veh) {
   // If we collided, kill speed
   if (Math.abs(nx - (before[0] + dirX * veh.velocity * dt)) > 0.01 ||
       Math.abs(nz - (before[1] + dirZ * veh.velocity * dt)) > 0.01) {
+    damageVehicle(veh, Math.min(18, Math.abs(veh.velocity) * 0.8));
     veh.velocity *= 0.3;
   }
   veh.group.position.x = nx;
@@ -476,4 +878,8 @@ function updateVehicle(dt, veh) {
   }
   if (isBike && Math.abs(steer) < 0.01) veh.group.rotation.z *= Math.max(0, 1 - dt * 6);
   if (isBike && veh.occupied) updateBikeRiderPose(veh);
+  if (veh.smoke) {
+    veh.smoke.visible = veh.health < 45;
+    veh.smoke.rotation.y += dt * 1.5;
+  }
 }

@@ -86,6 +86,48 @@ function updatePeds(dt) {
   }
 }
 
+function updateCitySceneActors(dt) {
+  for (const actor of citySceneActors) {
+    if (actor.hitTimer > 0) actor.hitTimer -= dt;
+    actor.phase += dt * (actor.mode === 'dance' ? 6 : 2.2);
+    const swing = Math.sin(actor.phase);
+    actor.leftLeg.rotation.x = swing * (actor.mode === 'dance' ? 0.7 : 0.18);
+    actor.rightLeg.rotation.x = -actor.leftLeg.rotation.x;
+    actor.leftArm.rotation.x = -swing * (actor.mode === 'dance' ? 0.85 : 0.2);
+    actor.rightArm.rotation.x = -actor.leftArm.rotation.x;
+    actor.body.position.y = 1.05 + Math.abs(swing) * (actor.mode === 'dance' ? 0.1 : 0.025);
+    actor.body.scale.setScalar(actor.hitTimer > 0 ? 1.18 : 1);
+    if (actor.mode === 'dance') actor.group.rotation.y += dt * 0.9;
+    if (actor.mode === 'guard') actor.group.rotation.y += Math.sin(actor.phase * 0.35) * dt * 0.25;
+  }
+}
+
+function updateLocationAlert(dt) {
+  if (bankAlarm) {
+    bankAlarmTimer -= dt;
+    const bank = getLocationById('bank');
+    if (bank && bank.alarmLight) bank.alarmLight.intensity = Math.sin(frame * 0.45) > 0 ? 3.2 : 0.2;
+    if (bankAlarmTimer <= 0) bankAlarm = false;
+  } else {
+    const bank = getLocationById('bank');
+    if (bank && bank.alarmLight) bank.alarmLight.intensity = 0;
+  }
+}
+
+function updateLocationEffects(dt) {
+  for (const loc of cityLocations) {
+    if (loc.type === 'bar' && loc.danceFloor) {
+      const glow = 0.35 + Math.abs(Math.sin(frame * 0.08)) * 0.85;
+      loc.danceFloor.material.emissiveIntensity = glow;
+      loc.danceFloor.rotation.y += dt * 0.35;
+      if (loc.effectLights) {
+        loc.effectLights[0].intensity = 1.2 + Math.abs(Math.sin(frame * 0.1)) * 2.2;
+        loc.effectLights[1].intensity = 1.2 + Math.abs(Math.cos(frame * 0.12)) * 2.2;
+      }
+    }
+  }
+}
+
 function updateCamera(dt) {
   let targetX, targetY, targetZ, lookX, lookY, lookZ;
   if (inVehicle) {
@@ -120,7 +162,15 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
-  if (inVehicle) {
+  if (nearestServiceLocation && useServiceLocation(nearestServiceLocation)) {
+    return;
+  } else if (nearestMissionStart) {
+    startMission(nearestMissionStart);
+  } else if (activeLocation) {
+    exitLocation();
+  } else if (!inVehicle && nearestLocation) {
+    enterLocation(nearestLocation);
+  } else if (inVehicle) {
     // Exit
     const v = inVehicle;
     const exitOff = v.kind === 'bike' ? 1.5 : 2.2;
@@ -141,7 +191,7 @@ function tryEnterExit() {
     v.occupied = false;
     inVehicle = null;
     v.group.rotation.z = 0;
-    document.getElementById('mode').textContent = 'ON FOOT';
+    document.getElementById('mode').textContent = wantedLevel > 0 ? 'WANTED' : 'ON FOOT';
     document.getElementById('speedo').classList.remove('show');
   } else if (nearestVehicle || nearestTrafficVehicle) {
     inVehicle = nearestVehicle || hijackTrafficVehicle(nearestTrafficVehicle);
@@ -197,6 +247,7 @@ const mmCanvas = document.getElementById('minimap');
 const mmCtx = mmCanvas.getContext('2d');
 const mmSize = 200;
 const mmScale = mmSize / (GRID * BLOCK + 30);
+const minimapWorldPos = new Vector3();
 function drawMinimap() {
   mmCtx.clearRect(0, 0, mmSize, mmSize);
   // BG
@@ -229,7 +280,8 @@ function drawMinimap() {
   // Buildings (subset)
   mmCtx.fillStyle = '#4a4a5a';
   for (const b of buildingMeshes) {
-    const [x, y] = w2m(b.position.x, b.position.z);
+    b.getWorldPosition(minimapWorldPos);
+    const [x, y] = w2m(minimapWorldPos.x, minimapWorldPos.z);
     if (x < -10 || x > mmSize+10 || y < -10 || y > mmSize+10) continue;
     const w = b.geometry.parameters.width * mmScale;
     const d = b.geometry.parameters.depth * mmScale;
@@ -254,6 +306,25 @@ function drawMinimap() {
     const [x, y] = w2m(v.group.position.x, v.group.position.z);
     mmCtx.fillRect(x-1.5, y-1.5, 3, 3);
   }
+  // City location markers
+  mmCtx.font = 'bold 8px IBM Plex Mono';
+  mmCtx.textAlign = 'center';
+  mmCtx.textBaseline = 'middle';
+  for (const loc of cityLocations) {
+    const [x, y] = w2m(loc.entrance.x, loc.entrance.z);
+    if (x < -12 || x > mmSize+12 || y < -12 || y > mmSize+12) continue;
+    mmCtx.fillStyle = loc.mapColor;
+    mmCtx.beginPath();
+    mmCtx.moveTo(x, y - 5);
+    mmCtx.lineTo(x + 5, y);
+    mmCtx.lineTo(x, y + 5);
+    mmCtx.lineTo(x - 5, y);
+    mmCtx.closePath();
+    mmCtx.fill();
+    mmCtx.fillStyle = '#101018';
+    mmCtx.fillText(loc.label[0], x, y + 0.5);
+  }
+  drawMissionMarker(w2m);
   // Player (always center)
   mmCtx.save();
   mmCtx.translate(mmSize/2, mmSize/2);
@@ -272,12 +343,37 @@ function drawMinimap() {
   mmCtx.fillText('N', mmSize - 16, 16);
 }
 
+function drawMissionMarker(w2m) {
+  if (!missionTarget || !activeMission || activeMission.status !== 'active') return;
+  const [x, y] = w2m(missionTarget.entrance.x, missionTarget.entrance.z);
+  if (x < -18 || x > mmSize + 18 || y < -18 || y > mmSize + 18) return;
+  mmCtx.save();
+  mmCtx.translate(x, y);
+  mmCtx.rotate(frame * 0.06);
+  mmCtx.strokeStyle = '#ffd200';
+  mmCtx.lineWidth = 2;
+  mmCtx.beginPath();
+  mmCtx.moveTo(0, -9);
+  mmCtx.lineTo(9, 0);
+  mmCtx.lineTo(0, 9);
+  mmCtx.lineTo(-9, 0);
+  mmCtx.closePath();
+  mmCtx.stroke();
+  mmCtx.restore();
+}
+
 // -------------------- MAIN LOOP --------------------
 const promptEl = document.getElementById('prompt');
 const kmhEl = document.getElementById('kmh');
 const gearEl = document.getElementById('gear');
 const distEl = document.getElementById('dist');
 const vnearEl = document.getElementById('vnear');
+const locationBadgeEl = document.getElementById('locationBadge');
+const objectivePanelEl = document.getElementById('objectivePanel');
+const objectiveTitleEl = document.getElementById('objectiveTitle');
+const objectiveTextEl = document.getElementById('objectiveText');
+const objectiveTimerEl = document.getElementById('objectiveTimer');
+const objectiveWantedEl = document.getElementById('objectiveWanted');
 let frame = 0;
 
 function loop() {
@@ -287,13 +383,23 @@ function loop() {
 
   if (inVehicle) {
     updateVehicle(dt, inVehicle);
+    nearestServiceLocation = findNearestServiceLocation();
+    nearestMissionStart = null;
   } else {
     updatePlayer(dt);
     nearestVehicle = findNearestVehicle();
-    nearestTrafficVehicle = nearestVehicle ? null : findNearestTrafficVehicle();
+    nearestLocation = findNearestLocation();
+    nearestMissionStart = findMissionStart();
+    nearestServiceLocation = findNearestServiceLocation();
+    nearestTrafficVehicle = nearestVehicle || nearestLocation ? null : findNearestTrafficVehicle();
   }
   updateAITraffic(dt);
   updatePeds(dt);
+  updateCitySceneActors(dt);
+  updateLocationAlert(dt);
+  updateLocationEffects(dt);
+  updateMission(dt);
+  updatePoliceChase(dt);
   updateCamera(dt);
 
   // F press
@@ -313,6 +419,21 @@ function loop() {
     gearEl.textContent = inVehicle.velocity < -0.5 ? 'R' : 'D';
   }
   distEl.textContent = Math.floor(distanceTraveled);
+  if (locationBadgeEl) {
+    const locLabel = activeLocation ? activeLocation.label : (nearestLocation ? nearestLocation.label : '');
+    locationBadgeEl.textContent = wantedLevel > 0 ? `WANTED LEVEL ${wantedLevel}` : locLabel;
+    locationBadgeEl.classList.toggle('show', wantedLevel > 0 || !!locLabel);
+    locationBadgeEl.classList.toggle('alert', wantedLevel > 0);
+  }
+  if (objectivePanelEl) {
+    const showObjective = !!activeMission || wantedLevel > 0 || bankAlarm || (inVehicle && inVehicle.health < 100);
+    objectivePanelEl.classList.toggle('show', showObjective);
+    objectivePanelEl.classList.toggle('alert', wantedLevel > 0 || bankAlarm);
+    objectiveTitleEl.textContent = activeMission ? activeMission.name : (wantedLevel > 0 ? 'Wanted' : 'Vehicle Status');
+    objectiveTextEl.textContent = activeMission ? activeMission.statusText : (wantedLevel > 0 ? 'Reach GAS or GARAGE to lose heat.' : `Vehicle health ${Math.round(inVehicle ? inVehicle.health : 100)}%`);
+    objectiveTimerEl.textContent = activeMission && activeMission.status === 'active' ? `${Math.ceil(missionTimer)}s` : '';
+    objectiveWantedEl.textContent = wantedLevel > 0 ? `WANTED ${wantedLevel}` : '';
+  }
   // Count nearby vehicles
   let count = 0;
   for (const v of vehicles) {
@@ -322,8 +443,32 @@ function loop() {
   vnearEl.textContent = count;
 
   // Prompt
-  promptEl.classList.toggle('vehicle-mode', !!inVehicle);
-  if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) {
+  promptEl.classList.toggle('vehicle-mode', !!inVehicle || !!activeLocation);
+  if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>REPAIR / REPAINT';
+  }
+  else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'gas') {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>REFUEL / PATCH';
+  }
+  else if (nearestServiceLocation && !inVehicle && nearestServiceLocation.type === 'shop') {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>SHOP ITEM';
+  }
+  else if (nearestMissionStart) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>START MISSION';
+  }
+  else if (activeLocation) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = '<kbd>F</kbd>EXIT TO STREET';
+  }
+  else if (!inVehicle && nearestLocation) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = `<kbd>F</kbd>${nearestLocation.prompt}`;
+  }
+  else if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) {
     promptEl.classList.add('show');
     promptEl.innerHTML = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
   }
@@ -332,7 +477,8 @@ function loop() {
     promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
   }
   else promptEl.classList.remove('show');
-  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle);
+  const useLabel = nearestServiceLocation ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
+  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || nearestServiceLocation), useLabel);
 
   renderer.render(scene, camera);
 }

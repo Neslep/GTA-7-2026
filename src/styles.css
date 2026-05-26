@@ -63,6 +63,68 @@
   .status-pill .dot { display: inline-block; width: 6px; height: 6px; background: #00ff88; border-radius: 50%; margin-right: 8px; animation: pulse 1.2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+  #locationBadge {
+    position: absolute; top: 78px; left: 50%; transform: translateX(-50%);
+    background: rgba(10, 10, 18, 0.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 195, 255, 0.45);
+    color: #b8f2ff;
+    padding: 8px 18px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-align: center;
+    min-width: 140px;
+    opacity: 0;
+    transition: opacity 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  }
+  #locationBadge.show { opacity: 1; }
+  #locationBadge.alert {
+    color: #ffd200;
+    border-color: rgba(255, 89, 0, 0.8);
+    box-shadow: 0 0 24px rgba(255, 89, 0, 0.22);
+  }
+
+  #objectivePanel {
+    position: absolute; top: 124px; left: 50%; transform: translateX(-50%);
+    width: min(340px, calc(100vw - 40px));
+    background: rgba(10, 10, 18, 0.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 210, 0, 0.34);
+    border-left: 2px solid #ffd200;
+    padding: 10px 14px;
+    opacity: 0;
+    transition: opacity 0.18s ease, border-color 0.18s ease;
+    clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  }
+  #objectivePanel.show { opacity: 1; }
+  #objectivePanel.alert {
+    border-color: rgba(255, 89, 0, 0.74);
+    border-left-color: #ff5900;
+  }
+  #objectiveTitle {
+    font-family: 'Bebas Neue';
+    font-size: 20px;
+    letter-spacing: 2px;
+    color: #ffd200;
+    line-height: 1;
+  }
+  #objectiveText {
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: rgba(255,255,255,0.78);
+  }
+  .objective-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 7px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #00c3ff;
+  }
+
   /* Speedometer (driving) */
   #speedo {
     position: absolute; bottom: 30px; right: 30px;
@@ -263,6 +325,21 @@
     }
     .logo { font-size: 24px; letter-spacing: 2px; }
     .status-pill { padding: 7px 12px; font-size: 10px; letter-spacing: 1.5px; }
+    #locationBadge {
+      top: calc(112px + env(safe-area-inset-top));
+      max-width: 76vw;
+      min-width: 0;
+      padding: 7px 14px;
+      font-size: 10px;
+      letter-spacing: 2px;
+    }
+    #objectivePanel {
+      top: calc(148px + env(safe-area-inset-top));
+      width: min(300px, calc(100vw - 28px));
+      padding: 9px 12px;
+    }
+    #objectiveTitle { font-size: 18px; }
+    #objectiveText { font-size: 10px; }
 
     #minimap-wrap {
       top: calc(68px + env(safe-area-inset-top));
