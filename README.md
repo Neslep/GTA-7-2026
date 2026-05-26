@@ -15,6 +15,8 @@
 - **Open-world neon city** — procedural roads, sidewalks, parks, street lamps, and high-rise blocks.
 - **On-foot exploration** — third-person movement with sprinting, jumping, collision, and camera orbit.
 - **Drivable vehicles** — walk up to a parked car, press `F`, and switch into driving mode instantly.
+- **Rideable motorbikes** — weave through the city on faster, tighter two-wheel vehicles.
+- **Traffic carjacking** — get close to a moving traffic car and press `F` to take control.
 - **Living traffic** — AI cars loop through city lanes while pedestrians wander around the districts.
 - **Vehicle HUD** — speedometer, gear indicator, live mode label, and enter/exit prompts.
 - **Minimap system** — tracks roads, buildings, nearby vehicles, traffic, and player direction.
@@ -30,11 +32,17 @@
 | Sprint / Boost | `Shift` |
 | Jump / Handbrake | `Space` |
 | Enter / Exit vehicle | `F` |
+| Hijack traffic vehicle | `F` near moving traffic |
+| Hit / attack | `E` or left click |
+| Hold gun | `1` |
+| Hold object | `2` |
+| Empty hands | `0` |
 | Rotate camera | Mouse |
 | Move on mobile | Left joystick |
 | Sprint / Boost on mobile | `RUN` / `BOOST` |
 | Jump / Handbrake on mobile | `JUMP` / `BRAKE` |
 | Enter / Exit on mobile | `ENTER` / `EXIT` |
+| Hit on mobile | `HIT` |
 | Rotate camera on mobile | Drag the screen |
 | Release pointer lock | `Esc` |
 

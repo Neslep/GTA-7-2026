@@ -21,6 +21,12 @@ addEventListener('keyup', e => { setInputKey('keyboard', e.code, false); });
 addEventListener('mousemove', e => {
   if (mouse.locked) { mouse.dx += e.movementX; mouse.dy += e.movementY; }
 });
+addEventListener('mousedown', e => {
+  if (e.button === 0 && hud.classList.contains('active') && !inVehicle) setInputKey('keyboard', 'KeyE', true);
+});
+addEventListener('mouseup', e => {
+  if (e.button === 0) setInputKey('keyboard', 'KeyE', false);
+});
 
 const playBtn = document.getElementById('playBtn');
 const intro = document.getElementById('intro');
@@ -28,6 +34,7 @@ const hud = document.getElementById('hud');
 const mobileRunBtn = document.getElementById('mobileRunBtn');
 const mobileJumpBtn = document.getElementById('mobileJumpBtn');
 const mobileCarBtn = document.getElementById('mobileCarBtn');
+const mobileHitBtn = document.getElementById('mobileHitBtn');
 
 if (hasTouchControls) document.body.classList.add('touch-ui');
 
@@ -153,12 +160,12 @@ document.querySelectorAll('[data-touch-key]').forEach(button => {
   button.addEventListener('contextmenu', e => e.preventDefault());
 });
 
-function setMobileControlMode(driving, canEnterVehicle) {
+function setMobileControlMode(driving, canEnterVehicle, canHijackVehicle = false) {
   if (!mobileRunBtn || !mobileJumpBtn || !mobileCarBtn) return;
   mobileRunBtn.textContent = driving ? 'BOOST' : 'RUN';
   mobileJumpBtn.textContent = driving ? 'BRAKE' : 'JUMP';
-  mobileCarBtn.textContent = driving ? 'EXIT' : (canEnterVehicle ? 'ENTER' : 'CAR');
-  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle);
+  mobileCarBtn.textContent = driving ? 'EXIT' : (canEnterVehicle ? 'ENTER' : (canHijackVehicle ? 'HIJACK' : 'CAR'));
+  mobileCarBtn.classList.toggle('ready', driving || canEnterVehicle || canHijackVehicle);
 }
 
 addEventListener('blur', () => {
@@ -168,6 +175,7 @@ addEventListener('blur', () => {
 });
 
 let fPressedLast = false;
+let ePressedLast = false;
 
 // -------------------- CAMERA ORBIT STATE --------------------
 const camYaw = { v: 0 };
@@ -176,6 +184,7 @@ const camPitch = { v: 0.15 };
 // -------------------- GAME STATE --------------------
 let inVehicle = null;       // reference to vehicle object when driving
 let nearestVehicle = null;  // for prompt
+let nearestTrafficVehicle = null; // running AI traffic car available for hijack
 let distanceTraveled = 0;
 let lastPos = new Vector3();
 
@@ -195,6 +204,148 @@ function resolveCollision(curX, curZ, newX, newZ, radius = 0.6) {
   if (!collidesAt(newX, curZ, radius)) return [newX, curZ];
   if (!collidesAt(curX, newZ, radius)) return [curX, newZ];
   return [curX, curZ];
+}
+
+// -------------------- PLAYER ACTIONS --------------------
+function clearHeldItem() {
+  while (player.heldItem.children.length) player.heldItem.remove(player.heldItem.children[0]);
+}
+
+function setHeldItem(type) {
+  if (player.heldType === type) return;
+  player.heldType = type;
+  clearHeldItem();
+  player.heldItem.position.set(0.58, 1.05, 0.34);
+  player.heldItem.rotation.set(0, 0, 0);
+
+  if (type === 'gun') {
+    const gunMat = new MeshStandardMaterial({ color: 0x181820, roughness: 0.35, metalness: 0.6 });
+    const barrel = new Mesh(new BoxGeometry(0.16, 0.14, 0.72), gunMat);
+    barrel.position.set(0, 0.06, 0.22);
+    const grip = new Mesh(new BoxGeometry(0.14, 0.34, 0.16), gunMat);
+    grip.position.set(0, -0.15, -0.06);
+    grip.rotation.x = -0.35;
+    const sight = new Mesh(new BoxGeometry(0.12, 0.05, 0.2), new MeshBasicMaterial({ color: 0xff3030 }));
+    sight.position.set(0, 0.16, 0.2);
+    player.heldItem.add(barrel, grip, sight);
+  } else if (type === 'object') {
+    const box = new Mesh(
+      new BoxGeometry(0.46, 0.34, 0.46),
+      new MeshStandardMaterial({ color: 0x88c8ff, roughness: 0.55, metalness: 0.15 })
+    );
+    box.castShadow = true;
+    player.heldItem.add(box);
+  }
+}
+
+function damagePed(ped, amount, knockX, knockZ) {
+  if (ped.downTimer > 0) return;
+  ped.health -= amount;
+  ped.hitTimer = 0.22;
+  ped.group.position.x += knockX;
+  ped.group.position.z += knockZ;
+  ped.dir = Math.atan2(knockX, knockZ);
+  if (ped.health <= 0) {
+    ped.health = 100;
+    ped.downTimer = 2.2;
+    ped.group.rotation.z = Math.PI / 2;
+  }
+}
+
+function hitNearbyPed() {
+  const attackRange = player.heldType === 'gun' ? 9 : 2.2;
+  const attackArc = player.heldType === 'gun' ? 0.55 : 0.35;
+  let target = null;
+  let best = attackRange;
+  const px = player.group.position.x;
+  const pz = player.group.position.z;
+  const fx = Math.sin(player.yaw);
+  const fz = Math.cos(player.yaw);
+
+  for (const ped of peds) {
+    if (ped.downTimer > 0) continue;
+    const dx = ped.group.position.x - px;
+    const dz = ped.group.position.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist > best || dist < 0.001) continue;
+    const dot = (dx / dist) * fx + (dz / dist) * fz;
+    if (dot < attackArc) continue;
+    best = dist;
+    target = ped;
+  }
+
+  if (!target) return;
+  const dx = target.group.position.x - px;
+  const dz = target.group.position.z - pz;
+  const dist = Math.max(0.001, Math.hypot(dx, dz));
+  const power = player.heldType === 'gun' ? 38 : (player.heldType === 'object' ? 32 : 24);
+  const knock = player.heldType === 'gun' ? 1.1 : 0.55;
+  damagePed(target, power, dx / dist * knock, dz / dist * knock);
+}
+
+function updatePlayerActionPose(moving, sprint, dt) {
+  player.actionTimer = Math.max(0, player.actionTimer - dt);
+  const attackBlend = player.actionTimer > 0 ? Math.sin((player.actionTimer / 0.28) * Math.PI) : 0;
+  const stride = Math.sin(player.walkPhase);
+  const runScale = sprint ? 0.75 : 0.42;
+
+  player.body.rotation.x = 0;
+  player.head.rotation.x = 0;
+  player.group.rotation.z = 0;
+  player.leftLeg.rotation.x = moving && player.onGround ? stride * runScale : 0;
+  player.rightLeg.rotation.x = moving && player.onGround ? -stride * runScale : 0;
+  player.leftArm.rotation.x = moving ? -stride * runScale * 0.75 : 0.12;
+  player.rightArm.rotation.x = moving ? stride * runScale * 0.75 : 0.12;
+  player.leftArm.rotation.z = -0.08;
+  player.rightArm.rotation.z = 0.08;
+
+  if (!player.onGround) {
+    player.leftLeg.rotation.x = 0.28;
+    player.rightLeg.rotation.x = -0.28;
+    player.leftArm.rotation.x = -0.35;
+    player.rightArm.rotation.x = -0.35;
+  }
+
+  if (player.heldType === 'gun') {
+    player.rightArm.rotation.x = -1.25 - attackBlend * 0.18;
+    player.leftArm.rotation.x = -0.85;
+    player.heldItem.position.set(0.5, 1.28, 0.58);
+  } else if (player.heldType === 'object') {
+    player.rightArm.rotation.x = -0.72 - attackBlend * 0.65;
+    player.leftArm.rotation.x = -0.35;
+    player.heldItem.position.set(0.58, 1.08 + attackBlend * 0.2, 0.32);
+    player.heldItem.rotation.y += dt * 1.8;
+  } else if (attackBlend > 0) {
+    player.leftArm.rotation.x = 0.12;
+    player.leftArm.rotation.z = -0.08;
+    player.rightArm.rotation.x = -1.2 * attackBlend;
+    player.rightArm.rotation.z = 0.08 + 0.42 * attackBlend;
+  }
+}
+
+function updateBikeRiderPose(veh) {
+  const yaw = veh.group.rotation.y;
+  const lean = veh.group.rotation.z;
+  const seatOffsetZ = -0.22;
+  player.group.visible = true;
+  player.group.position.set(
+    veh.group.position.x + Math.sin(yaw) * seatOffsetZ,
+    veh.group.position.y + 0.28,
+    veh.group.position.z + Math.cos(yaw) * seatOffsetZ
+  );
+  player.group.rotation.y = yaw;
+  player.group.rotation.z = lean * 0.55;
+  player.yaw = yaw;
+
+  player.body.position.y = 1.02;
+  player.body.rotation.x = -0.24;
+  player.head.rotation.x = 0.16;
+  player.heldItem.visible = false;
+
+  player.leftArm.rotation.set(-1.2, 0, -0.36);
+  player.rightArm.rotation.set(-1.2, 0, 0.36);
+  player.leftLeg.rotation.set(-0.95, 0, -0.28);
+  player.rightLeg.rotation.set(-0.95, 0, 0.28);
 }
 
 // -------------------- UPDATE LOOPS --------------------
@@ -218,6 +369,15 @@ function updatePlayer(dt) {
   }
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
   const speed = sprint ? 8.5 : 4.2;
+
+  if (keys['Digit1']) setHeldItem('gun');
+  if (keys['Digit2']) setHeldItem('object');
+  if (keys['Digit0']) setHeldItem('empty');
+  if (keys['KeyE'] && !ePressedLast) {
+    player.actionTimer = 0.28;
+    hitNearbyPed();
+  }
+  ePressedLast = !!keys['KeyE'];
 
   // Rotate intent by camera yaw
   const cosY = Math.cos(camYaw.v), sinY = Math.sin(camYaw.v);
@@ -257,20 +417,20 @@ function updatePlayer(dt) {
   if (moving && player.onGround) {
     player.walkPhase += dt * speed * 1.4;
     player.body.position.y = 1.15 + Math.sin(player.walkPhase * 2) * 0.04;
-    player.legs.rotation.x = Math.sin(player.walkPhase) * 0.4;
   } else {
     player.body.position.y = 1.15;
-    player.legs.rotation.x *= 0.85;
   }
+  updatePlayerActionPose(moving, sprint, dt);
 }
 
 function updateVehicle(dt, veh) {
   // Acceleration / braking
   const throttle = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
-  const maxSpeed = sprint ? 38 : 22;
-  const accel = 14;
-  const decel = 6;
+  const isBike = veh.kind === 'bike';
+  const maxSpeed = isBike ? (sprint ? 46 : 28) : (sprint ? 38 : 22);
+  const accel = isBike ? 18 : 14;
+  const decel = isBike ? 7.5 : 6;
   if (throttle > 0) veh.velocity += accel * dt;
   else if (throttle < 0) veh.velocity -= accel * 0.7 * dt;
   else {
@@ -287,10 +447,13 @@ function updateVehicle(dt, veh) {
 
   // Steering: A=left, D=right
   const steer = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
-  const turnRate = 1.8;
+  const turnRate = isBike ? 2.8 : 1.8;
   // turning effectiveness depends on speed
-  const speedFactor = Math.min(1, Math.abs(veh.velocity) / 6);
+  const speedFactor = Math.min(1, Math.abs(veh.velocity) / (isBike ? 4 : 6));
   veh.group.rotation.y += steer * turnRate * dt * speedFactor;
+  if (isBike) {
+    veh.group.rotation.z = -steer * Math.min(0.36, Math.abs(veh.velocity) * 0.014) * speedFactor;
+  }
 
   // Move
   const dirX = Math.sin(veh.group.rotation.y);
@@ -298,7 +461,7 @@ function updateVehicle(dt, veh) {
   let nx = veh.group.position.x + dirX * veh.velocity * dt;
   let nz = veh.group.position.z + dirZ * veh.velocity * dt;
   const before = [veh.group.position.x, veh.group.position.z];
-  [nx, nz] = resolveCollision(before[0], before[1], nx, nz, 1.4);
+  [nx, nz] = resolveCollision(before[0], before[1], nx, nz, isBike ? 0.8 : 1.4);
   // If we collided, kill speed
   if (Math.abs(nx - (before[0] + dirX * veh.velocity * dt)) > 0.01 ||
       Math.abs(nz - (before[1] + dirZ * veh.velocity * dt)) > 0.01) {
@@ -311,4 +474,6 @@ function updateVehicle(dt, veh) {
   for (const w of veh.wheels) {
     w.rotation.x += veh.velocity * dt * 1.8;
   }
+  if (isBike && Math.abs(steer) < 0.01) veh.group.rotation.z *= Math.max(0, 1 - dt * 6);
+  if (isBike && veh.occupied) updateBikeRiderPose(veh);
 }
