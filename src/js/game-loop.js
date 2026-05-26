@@ -162,7 +162,7 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
-  if (nearestServiceLocation && useServiceLocation(nearestServiceLocation)) {
+  if (nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
     return;
   } else if (nearestMissionStart) {
     startMission(nearestMissionStart);
@@ -452,7 +452,7 @@ function loop() {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>REFUEL / PATCH';
   }
-  else if (nearestServiceLocation && !inVehicle && nearestServiceLocation.type === 'shop') {
+  else if (canUseShopService(nearestServiceLocation)) {
     promptEl.classList.add('show');
     promptEl.innerHTML = '<kbd>F</kbd>SHOP ITEM';
   }
@@ -477,8 +477,9 @@ function loop() {
     promptEl.innerHTML = '<kbd>F</kbd>EXIT VEHICLE';
   }
   else promptEl.classList.remove('show');
-  const useLabel = nearestServiceLocation ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
-  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || nearestServiceLocation), useLabel);
+  const serviceReady = !!nearestServiceLocation && (inVehicle || canUseShopService(nearestServiceLocation));
+  const useLabel = serviceReady ? 'USE' : (nearestMissionStart ? 'START' : (activeLocation ? 'EXIT' : 'ENTER'));
+  setMobileControlMode(!!inVehicle, !!nearestVehicle, !!nearestTrafficVehicle, !!(activeLocation || nearestLocation || nearestMissionStart || serviceReady), useLabel);
 
   renderer.render(scene, camera);
 }

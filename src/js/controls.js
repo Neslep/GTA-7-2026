@@ -243,6 +243,10 @@ function findNearestLocation() {
   return nearest;
 }
 
+function canUseShopService(loc) {
+  return !!loc && loc.type === 'shop' && !inVehicle && !activeLocation && !nearestMissionStart;
+}
+
 function getLocationById(id) {
   return cityLocations.find(loc => loc.id === id);
 }
@@ -506,6 +510,7 @@ function repairVehicleAtGarage(veh) {
 }
 
 function findNearestServiceLocation() {
+  if (activeLocation) return null;
   const ref = getPlayerRefPosition();
   let nearest = null;
   let best = 7;

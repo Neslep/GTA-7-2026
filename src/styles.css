@@ -64,7 +64,7 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 
   #locationBadge {
-    position: absolute; top: 78px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
     background: rgba(10, 10, 18, 0.72); backdrop-filter: blur(8px);
     border: 1px solid rgba(0, 195, 255, 0.45);
     color: #b8f2ff;
@@ -86,8 +86,9 @@
   }
 
   #objectivePanel {
-    position: absolute; top: 124px; left: 50%; transform: translateX(-50%);
-    width: min(340px, calc(100vw - 40px));
+    position: absolute; top: 112px; left: 50%; transform: translateX(-50%);
+    width: min(320px, calc(100vw - 440px));
+    min-width: 260px;
     background: rgba(10, 10, 18, 0.72); backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 210, 0, 0.34);
     border-left: 2px solid #ffd200;
@@ -208,7 +209,8 @@
   }
   .touch-ui #hud.active #mobileControls { display: block; }
   .touch-ui .controls-hint,
-  .touch-ui #ticker { display: none; }
+  .touch-ui #ticker,
+  .touch-ui #objectivePanel.show ~ .controls-hint { display: none; }
   @media (pointer: coarse) {
     #hud.active #mobileControls { display: block; }
     .controls-hint,
@@ -326,16 +328,18 @@
     .logo { font-size: 24px; letter-spacing: 2px; }
     .status-pill { padding: 7px 12px; font-size: 10px; letter-spacing: 1.5px; }
     #locationBadge {
-      top: calc(112px + env(safe-area-inset-top));
-      max-width: 76vw;
+      top: calc(204px + env(safe-area-inset-top));
+      max-width: 52vw;
       min-width: 0;
       padding: 7px 14px;
       font-size: 10px;
       letter-spacing: 2px;
     }
     #objectivePanel {
-      top: calc(148px + env(safe-area-inset-top));
+      top: calc(240px + env(safe-area-inset-top));
+      left: 50%;
       width: min(300px, calc(100vw - 28px));
+      min-width: 0;
       padding: 9px 12px;
     }
     #objectiveTitle { font-size: 18px; }
@@ -360,7 +364,7 @@
     #speedo .num .unit { font-size: 12px; margin-left: 4px; }
     #speedo .gear { font-size: 9px; }
     #prompt {
-      bottom: 44%;
+      bottom: 38%;
       max-width: 86vw;
       padding: 9px 16px;
       font-size: 11px;
@@ -368,7 +372,7 @@
       text-align: center;
     }
     #prompt.vehicle-mode {
-      bottom: calc(164px + env(safe-area-inset-bottom));
+      bottom: calc(154px + env(safe-area-inset-bottom));
       left: 50%;
       transform: translateX(-50%);
     }
@@ -399,4 +403,12 @@
     .mobile-btn { width: 56px; height: 56px; font-size: 9px; }
     #minimap-wrap { width: 108px; height: 108px; top: calc(58px + env(safe-area-inset-top)); }
     #speedo { top: calc(58px + env(safe-area-inset-top)); }
+    #locationBadge { top: calc(164px + env(safe-area-inset-top)); max-width: 44vw; }
+    #objectivePanel {
+      top: calc(198px + env(safe-area-inset-top));
+      width: min(260px, 46vw);
+      max-height: 92px;
+      overflow: hidden;
+    }
+    #prompt { bottom: calc(132px + env(safe-area-inset-bottom)); }
   }

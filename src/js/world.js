@@ -224,6 +224,90 @@ function makeLamp(x, z) {
 // -------------------- CITY LOCATIONS / AMBIENT SCENES --------------------
 const cityLocations = [];
 const citySceneActors = [];
+const reservedAreas = [];
+const placedProps = [];
+
+function areaOverlaps(a, b, padding = 0) {
+  return Math.abs(a.x - b.x) < (a.w + b.w) / 2 + padding &&
+    Math.abs(a.z - b.z) < (a.d + b.d) / 2 + padding;
+}
+
+function isOnRoad(x, z, padding = 1.4) {
+  for (let i = 0; i <= GRID; i++) {
+    const roadPos = -HALF + i * BLOCK;
+    if (Math.abs(z - roadPos) < ROAD / 2 + padding || Math.abs(x - roadPos) < ROAD / 2 + padding) return true;
+  }
+  return false;
+}
+
+function isAreaClear(x, z, w, d, padding = 1.5) {
+  const area = { x, z, w, d };
+  for (const reserved of reservedAreas) {
+    if (areaOverlaps(area, reserved, padding)) return false;
+  }
+  for (const b of buildings) {
+    if (areaOverlaps(area, { x: b.x, z: b.z, w: b.w * 2, d: b.d * 2 }, padding)) return false;
+  }
+  return true;
+}
+
+function reserveArea(x, z, w, d, padding = 0) {
+  reservedAreas.push({ x, z, w: w + padding * 2, d: d + padding * 2 });
+}
+
+function removeMeshFromScene(mesh) {
+  if (!mesh) return;
+  if (mesh.parent) mesh.parent.remove(mesh);
+  else scene.remove(mesh);
+}
+
+function removeOverlappingBuildings(x, z, w, d, padding = 2) {
+  const area = { x, z, w, d };
+  for (let i = buildings.length - 1; i >= 0; i--) {
+    const b = buildings[i];
+    if (!areaOverlaps(area, { x: b.x, z: b.z, w: b.w * 2, d: b.d * 2 }, padding)) continue;
+    removeMeshFromScene(b.mesh);
+    const meshIndex = buildingMeshes.indexOf(b.mesh);
+    if (meshIndex !== -1) buildingMeshes.splice(meshIndex, 1);
+    buildings.splice(i, 1);
+  }
+}
+
+function isPointReserved(x, z, radius = 1.2) {
+  for (const area of reservedAreas) {
+    if (Math.abs(x - area.x) < area.w / 2 + radius && Math.abs(z - area.z) < area.d / 2 + radius) return true;
+  }
+  for (const prop of placedProps) {
+    if (Math.hypot(x - prop.x, z - prop.z) < prop.radius + radius) return true;
+  }
+  return false;
+}
+
+function findSafePoint(x, z, radius = 1.2, options = {}) {
+  const avoidRoad = options.avoidRoad !== false;
+  const maxRadius = options.maxRadius || 10;
+  const candidates = [[x, z]];
+  for (let r = 2; r <= maxRadius; r += 2) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+      candidates.push([x + Math.cos(a) * r, z + Math.sin(a) * r]);
+    }
+  }
+  for (const [cx, cz] of candidates) {
+    if (Math.abs(cx) > HALF - 3 || Math.abs(cz) > HALF - 3) continue;
+    if (avoidRoad && isOnRoad(cx, cz, radius)) continue;
+    if (collidesAtPoint(cx, cz, radius)) continue;
+    if (isPointReserved(cx, cz, radius)) continue;
+    return [cx, cz];
+  }
+  return [x, z];
+}
+
+function collidesAtPoint(x, z, radius = 0.8) {
+  for (const b of buildings) {
+    if (Math.abs(x - b.x) < b.w + radius && Math.abs(z - b.z) < b.d + radius) return true;
+  }
+  return false;
+}
 
 function makeTextTexture(text, bg = '#111118', fg = '#ffd200', glow = '#ff5900') {
   const c = document.createElement('canvas');
@@ -266,6 +350,7 @@ function makeNeonLight(x, y, z, color, intensity = 1.8, distance = 18) {
 }
 
 function makeBench(x, z) {
+  [x, z] = findSafePoint(x, z, 1.4);
   const g = new Group();
   const mat = new MeshStandardMaterial({ color: 0x6a3a20, roughness: 0.75 });
   const metal = new MeshStandardMaterial({ color: 0x202028, roughness: 0.55, metalness: 0.4 });
@@ -283,9 +368,11 @@ function makeBench(x, z) {
   g.position.set(x, 0, z);
   g.rotation.y = Math.random() < 0.5 ? 0 : Math.PI / 2;
   scene.add(g);
+  placedProps.push({ x, z, radius: 1.9 });
 }
 
 function makeTrashCan(x, z) {
+  [x, z] = findSafePoint(x, z, 0.9);
   const can = new Mesh(
     new CylinderGeometry(0.35, 0.42, 0.9, 10),
     new MeshStandardMaterial({ color: 0x2b6b54, roughness: 0.8, metalness: 0.2 })
@@ -293,9 +380,11 @@ function makeTrashCan(x, z) {
   can.position.set(x, 0.45, z);
   can.castShadow = true;
   scene.add(can);
+  placedProps.push({ x, z, radius: 1.0 });
 }
 
 function makeATM(x, z) {
+  [x, z] = findSafePoint(x, z, 1.1);
   const g = new Group();
   const body = new Mesh(
     new BoxGeometry(1.4, 2.1, 0.65),
@@ -311,9 +400,11 @@ function makeATM(x, z) {
   g.add(body, screen);
   g.position.set(x, 0, z);
   scene.add(g);
+  placedProps.push({ x, z, radius: 1.3 });
 }
 
 function makeBillboard(x, z, text, color = '#00c3ff') {
+  [x, z] = findSafePoint(x, z, 2.4);
   const g = new Group();
   const poleMat = new MeshStandardMaterial({ color: 0x24242c, roughness: 0.65, metalness: 0.45 });
   const pole = new Mesh(new CylinderGeometry(0.12, 0.16, 5.4, 8), poleMat);
@@ -323,9 +414,12 @@ function makeBillboard(x, z, text, color = '#00c3ff') {
   g.add(pole, board);
   g.position.set(x, 0, z);
   scene.add(g);
+  placedProps.push({ x, z, radius: 3.2 });
 }
 
 function makeSceneActor(x, z, color = 0xffd200, mode = 'idle') {
+  const offMap = Math.abs(x) > HALF || Math.abs(z) > HALF;
+  if (!offMap) [x, z] = findSafePoint(x, z, 0.9, { avoidRoad: mode !== 'dance' });
   const g = new Group();
   const body = new Mesh(new BoxGeometry(0.5, 0.72, 0.32), new MeshStandardMaterial({ color }));
   body.position.y = 1.05;
@@ -350,6 +444,7 @@ function makeSceneActor(x, z, color = 0xffd200, mode = 'idle') {
     hitTimer: 0,
     mode,
   });
+  if (!offMap) placedProps.push({ x, z, radius: 1.1 });
   return g;
 }
 
@@ -429,6 +524,10 @@ function makeLocationInterior(loc, index) {
 }
 
 function makeLocation(opts, index) {
+  removeOverlappingBuildings(opts.x, opts.z, opts.w + 12, opts.d + 14, 3);
+  removeOverlappingBuildings(opts.x, opts.z + opts.d / 2 + 4, 7, 8, 2);
+  reserveArea(opts.x, opts.z, opts.w, opts.d, 5);
+  reserveArea(opts.x, opts.z + opts.d / 2 + 4, 7, 8, 1);
   const loc = {
     id: opts.id,
     type: opts.type,
@@ -533,7 +632,7 @@ makeLocation({
   lightColor: 0xffd200,
   signColor: '#fff2a0',
   signGlow: '#ffd200',
-  x: 28, z: -62, w: 20, d: 13, h: 12,
+  x: 20, z: -62, w: 18, d: 13, h: 12,
 }, 1);
 makeLocation({
   id: 'police',
