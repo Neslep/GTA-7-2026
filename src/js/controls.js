@@ -202,6 +202,9 @@ let bankAlarmTimer = 0;
 let policeCars = [];
 let distanceTraveled = 0;
 let lastPos = new Vector3();
+let hijackState = null;
+const activeProjectiles = [];
+const activeEffects = [];
 
 const missionCatalog = [
   { id: 'bank-delivery', name: 'Bank Delivery', startId: 'bank', targetId: 'garage', seconds: 70, reward: 1200, objective: 'Deliver the bank package to the garage.' },
@@ -607,6 +610,237 @@ function updatePoliceChase(dt) {
 }
 
 // -------------------- PLAYER ACTIONS --------------------
+function worldForwardFromYaw(yaw) {
+  return { x: Math.sin(yaw), z: Math.cos(yaw) };
+}
+
+function applyHitToNearestTarget(range, arc, damage, knock) {
+  let target = null;
+  let targetType = 'ped';
+  let best = range;
+  const px = player.group.position.x;
+  const pz = player.group.position.z;
+  const forward = worldForwardFromYaw(player.yaw);
+
+  for (const ped of peds) {
+    if (ped.downTimer > 0) continue;
+    const dx = ped.group.position.x - px;
+    const dz = ped.group.position.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist > best || dist < 0.001) continue;
+    const dot = (dx / dist) * forward.x + (dz / dist) * forward.z;
+    if (dot < arc) continue;
+    best = dist;
+    target = ped;
+    targetType = 'ped';
+  }
+
+  for (const actor of citySceneActors) {
+    const dx = actor.group.position.x - px;
+    const dz = actor.group.position.z - pz;
+    const dist = Math.hypot(dx, dz);
+    if (dist > best || dist < 0.001) continue;
+    const dot = (dx / dist) * forward.x + (dz / dist) * forward.z;
+    if (dot < arc) continue;
+    best = dist;
+    target = actor;
+    targetType = 'actor';
+  }
+
+  if (!target) return false;
+  const dx = target.group.position.x - px;
+  const dz = target.group.position.z - pz;
+  const dist = Math.max(0.001, Math.hypot(dx, dz));
+  if (targetType === 'ped') {
+    damagePed(target, damage, dx / dist * knock, dz / dist * knock);
+  } else {
+    target.group.position.x += dx / dist * knock;
+    target.group.position.z += dz / dist * knock;
+    target.hitTimer = 0.28;
+  }
+  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
+  return true;
+}
+
+function damageTargetsNearPoint(x, z, radius, damage, knock) {
+  let hit = false;
+  for (const ped of peds) {
+    if (ped.downTimer > 0) continue;
+    const dx = ped.group.position.x - x;
+    const dz = ped.group.position.z - z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > radius || dist < 0.001) continue;
+    damagePed(ped, damage, dx / dist * knock, dz / dist * knock);
+    hit = true;
+  }
+  for (const actor of citySceneActors) {
+    const dx = actor.group.position.x - x;
+    const dz = actor.group.position.z - z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > radius || dist < 0.001) continue;
+    actor.group.position.x += dx / dist * knock;
+    actor.group.position.z += dz / dist * knock;
+    actor.hitTimer = 0.28;
+    hit = true;
+  }
+  if (hit && isNearSensitiveLocation(x, z)) triggerLocationAlert('WANTED');
+  return hit;
+}
+
+function spawnMuzzleFlash() {
+  const forward = worldForwardFromYaw(player.yaw);
+  const flash = new Group();
+  const flame = new Mesh(
+    new ConeGeometry(0.18, 0.7, 10),
+    new MeshBasicMaterial({ color: 0xffd200, transparent: true, opacity: 0.92 })
+  );
+  flame.rotation.x = Math.PI / 2;
+  const core = new Mesh(
+    new SphereGeometry(0.12, 8, 6),
+    new MeshBasicMaterial({ color: 0xff5900, transparent: true, opacity: 0.85 })
+  );
+  flash.add(flame, core);
+  flash.position.set(
+    player.group.position.x + forward.x * 0.95,
+    player.group.position.y + 1.35,
+    player.group.position.z + forward.z * 0.95
+  );
+  flash.rotation.y = player.yaw;
+  scene.add(flash);
+  activeEffects.push({ group: flash, ttl: 0.08, maxTtl: 0.08, kind: 'flash' });
+
+  const tracer = new Mesh(
+    new BoxGeometry(0.045, 0.045, 4.5),
+    new MeshBasicMaterial({ color: 0xfff4d8, transparent: true, opacity: 0.72 })
+  );
+  tracer.position.set(
+    player.group.position.x + forward.x * 3.2,
+    player.group.position.y + 1.32,
+    player.group.position.z + forward.z * 3.2
+  );
+  tracer.rotation.y = player.yaw;
+  scene.add(tracer);
+  activeEffects.push({ group: tracer, ttl: 0.12, maxTtl: 0.12, kind: 'tracer' });
+}
+
+function spawnImpactDust(x, z) {
+  const dust = new Group();
+  for (let i = 0; i < 4; i++) {
+    const puff = new Mesh(
+      new SphereGeometry(0.08 + Math.random() * 0.08, 6, 5),
+      new MeshBasicMaterial({ color: 0xb8b0a8, transparent: true, opacity: 0.34 })
+    );
+    puff.position.set((Math.random() - 0.5) * 0.5, 0.25 + Math.random() * 0.45, (Math.random() - 0.5) * 0.5);
+    dust.add(puff);
+  }
+  dust.position.set(x, 0, z);
+  scene.add(dust);
+  activeEffects.push({ group: dust, ttl: 0.32, maxTtl: 0.32, kind: 'dust' });
+}
+
+function spawnSparkBurst(x, y, z, intensity = 1) {
+  const sparks = new Group();
+  const count = Math.min(16, Math.max(6, Math.floor(8 * intensity)));
+  for (let i = 0; i < count; i++) {
+    const spark = new Mesh(
+      new BoxGeometry(0.035, 0.035, 0.38 + Math.random() * 0.34),
+      new MeshBasicMaterial({ color: Math.random() < 0.35 ? 0xfff4d8 : 0xff8a00, transparent: true, opacity: 0.95 })
+    );
+    spark.position.set((Math.random() - 0.5) * 0.45, (Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.45);
+    spark.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    spark.userData.vx = (Math.random() - 0.5) * 5.5 * intensity;
+    spark.userData.vy = (1.2 + Math.random() * 4.2) * intensity;
+    spark.userData.vz = (Math.random() - 0.5) * 5.5 * intensity;
+    sparks.add(spark);
+  }
+  sparks.position.set(x, y, z);
+  scene.add(sparks);
+  activeEffects.push({ group: sparks, ttl: 0.42, maxTtl: 0.42, kind: 'sparks' });
+}
+
+function throwHeldObject() {
+  const forward = worldForwardFromYaw(player.yaw);
+  const mesh = new Mesh(
+    new BoxGeometry(0.42, 0.32, 0.42),
+    new MeshStandardMaterial({ color: 0x88c8ff, roughness: 0.55, metalness: 0.15 })
+  );
+  mesh.castShadow = true;
+  mesh.position.set(
+    player.group.position.x + forward.x * 0.85,
+    player.group.position.y + 1.2,
+    player.group.position.z + forward.z * 0.85
+  );
+  scene.add(mesh);
+  activeProjectiles.push({
+    mesh,
+    type: 'object',
+    vx: forward.x * 18,
+    vy: 4.5,
+    vz: forward.z * 18,
+    ttl: 1.25,
+  });
+}
+
+function performPlayerAttack() {
+  player.actionTimer = 0.28;
+  if (player.heldType === 'gun') {
+    spawnMuzzleFlash();
+    applyHitToNearestTarget(13, 0.72, 44, 1.25);
+    if (isNearSensitiveLocation(player.group.position.x, player.group.position.z)) triggerLocationAlert('WANTED');
+  } else if (player.heldType === 'object') {
+    throwHeldObject();
+    applyHitToNearestTarget(4.8, 0.58, 26, 0.75);
+    setHeldItem('empty');
+  } else {
+    hitNearbyPed();
+  }
+}
+
+function updateCombatEffects(dt) {
+  for (let i = activeEffects.length - 1; i >= 0; i--) {
+    const fx = activeEffects[i];
+    fx.ttl -= dt;
+    const alpha = Math.max(0, fx.ttl / fx.maxTtl);
+    if (fx.kind !== 'sparks') fx.group.scale.setScalar(0.7 + (1 - alpha) * 1.4);
+    fx.group.traverse(obj => {
+      if (fx.kind === 'sparks' && obj.isMesh) {
+        obj.position.x += (obj.userData.vx || 0) * dt;
+        obj.position.y += (obj.userData.vy || 0) * dt;
+        obj.position.z += (obj.userData.vz || 0) * dt;
+        obj.userData.vy = (obj.userData.vy || 0) - 12 * dt;
+        obj.rotation.x += dt * 18;
+        obj.rotation.y += dt * 12;
+      }
+      if (obj.material && obj.material.transparent) {
+        if (typeof obj.userData.baseOpacity !== 'number') obj.userData.baseOpacity = obj.material.opacity;
+        obj.material.opacity = obj.userData.baseOpacity * alpha;
+      }
+    });
+    if (fx.ttl <= 0) {
+      scene.remove(fx.group);
+      activeEffects.splice(i, 1);
+    }
+  }
+
+  for (let i = activeProjectiles.length - 1; i >= 0; i--) {
+    const p = activeProjectiles[i];
+    p.ttl -= dt;
+    p.vy -= 15 * dt;
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.position.z += p.vz * dt;
+    p.mesh.rotation.x += dt * 9;
+    p.mesh.rotation.y += dt * 12;
+    const bodyHit = damageTargetsNearPoint(p.mesh.position.x, p.mesh.position.z, 1.3, 34, 1.0);
+    const hit = bodyHit || p.mesh.position.y <= 0.25 || collidesAt(p.mesh.position.x, p.mesh.position.z, 0.25);
+    if (hit || p.ttl <= 0) {
+      spawnImpactDust(p.mesh.position.x, p.mesh.position.z);
+      scene.remove(p.mesh);
+      activeProjectiles.splice(i, 1);
+    }
+  }
+}
+
 function clearHeldItem() {
   while (player.heldItem.children.length) player.heldItem.remove(player.heldItem.children[0]);
 }
@@ -652,39 +886,22 @@ function damagePed(ped, amount, knockX, knockZ) {
   }
 }
 
+function knockPlayerByVehicle(knockX, knockZ, power = 1) {
+  if (inVehicle || activeLocation) return;
+  player.knockTimer = 0.75;
+  player.knockVx = knockX * power;
+  player.knockVz = knockZ * power;
+  player.velocityY = Math.max(player.velocityY, 4.8 + power * 1.6);
+  player.onGround = false;
+  player.actionTimer = 0.34;
+  player.group.rotation.z = Math.sign(knockX || 1) * 0.65;
+  triggerLocationAlert('WANTED');
+}
+
 function hitNearbyPed() {
-  const attackRange = player.heldType === 'gun' ? 9 : 2.2;
-  const attackArc = player.heldType === 'gun' ? 0.55 : 0.35;
-  let target = null;
-  let best = attackRange;
-  const px = player.group.position.x;
-  const pz = player.group.position.z;
-  const fx = Math.sin(player.yaw);
-  const fz = Math.cos(player.yaw);
-
-  for (const ped of peds) {
-    if (ped.downTimer > 0) continue;
-    const dx = ped.group.position.x - px;
-    const dz = ped.group.position.z - pz;
-    const dist = Math.hypot(dx, dz);
-    if (dist > best || dist < 0.001) continue;
-    const dot = (dx / dist) * fx + (dz / dist) * fz;
-    if (dot < attackArc) continue;
-    best = dist;
-    target = ped;
-  }
-
-  if (!target) {
-    hitNearbySceneActor();
-    return;
-  }
-  const dx = target.group.position.x - px;
-  const dz = target.group.position.z - pz;
-  const dist = Math.max(0.001, Math.hypot(dx, dz));
-  const power = player.heldType === 'gun' ? 38 : (player.heldType === 'object' ? 32 : 24);
-  const knock = player.heldType === 'gun' ? 1.1 : 0.55;
-  damagePed(target, power, dx / dist * knock, dz / dist * knock);
-  if (isNearSensitiveLocation(px, pz)) triggerLocationAlert('WANTED');
+  const power = player.heldType === 'object' ? 32 : 24;
+  const knock = player.heldType === 'object' ? 0.7 : 0.55;
+  if (!applyHitToNearestTarget(2.2, 0.35, power, knock)) hitNearbySceneActor();
 }
 
 function updatePlayerActionPose(moving, sprint, dt) {
@@ -695,7 +912,7 @@ function updatePlayerActionPose(moving, sprint, dt) {
 
   player.body.rotation.x = 0;
   player.head.rotation.x = 0;
-  player.group.rotation.z = 0;
+  if (player.knockTimer <= 0) player.group.rotation.z = 0;
   player.leftLeg.rotation.x = moving && player.onGround ? stride * runScale : 0;
   player.rightLeg.rotation.x = moving && player.onGround ? -stride * runScale : 0;
   player.leftArm.rotation.x = moving ? -stride * runScale * 0.75 : 0.12;
@@ -766,7 +983,7 @@ function updatePlayer(dt) {
   if (keys['KeyS']) mz -= 1;
   if (keys['KeyA']) mx += 1;
   if (keys['KeyD']) mx -= 1;
-  const moving = mx !== 0 || mz !== 0;
+  let moving = mx !== 0 || mz !== 0;
   if (moving) {
     const len = Math.hypot(mx, mz);
     mx /= len; mz /= len;
@@ -778,10 +995,21 @@ function updatePlayer(dt) {
   if (keys['Digit2']) setHeldItem('object');
   if (keys['Digit0']) setHeldItem('empty');
   if (keys['KeyE'] && !ePressedLast) {
-    player.actionTimer = 0.28;
-    if (!tryBankVaultInteraction()) hitNearbyPed();
+    if (!tryBankVaultInteraction()) performPlayerAttack();
   }
   ePressedLast = !!keys['KeyE'];
+
+  if (player.knockTimer > 0) {
+    player.knockTimer -= dt;
+    player.group.position.x += player.knockVx * dt;
+    player.group.position.z += player.knockVz * dt;
+    player.knockVx *= Math.max(0, 1 - dt * 3.2);
+    player.knockVz *= Math.max(0, 1 - dt * 3.2);
+    player.group.rotation.z *= Math.max(0, 1 - dt * 2.5);
+    mx = 0;
+    mz = 0;
+    moving = false;
+  }
 
   // Rotate intent by camera yaw
   const cosY = Math.cos(camYaw.v), sinY = Math.sin(camYaw.v);
