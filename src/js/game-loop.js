@@ -7,9 +7,11 @@ function updateAITraffic(dt) {
     if (blocker) c.blockedTimer = (c.blockedTimer || 0) + dt;
     else c.blockedTimer = 0;
 
-    const waiting = blocker && c.blockedTimer < 1.15;
+    const waitLimit = blocker && blocker.type === 'vehicle' ? 3.2 : 1.35;
+    const waiting = blocker && c.blockedTimer < waitLimit;
     c.brakeBlend = MathUtils.clamp((c.brakeBlend || 0) + (waiting ? dt * 8 : -dt * 4), 0, 1);
-    const moveSpeed = c.speed * (1 - c.brakeBlend);
+    const crawl = blocker && blocker.type === 'vehicle' && !waiting ? 0.35 : 1;
+    const moveSpeed = c.speed * (1 - c.brakeBlend) * crawl;
     if (c.horizontal) {
       c.group.position.x += c.direction * -1 * moveSpeed * dt; // -direction matches initial rotation
       // wrap
@@ -25,7 +27,7 @@ function updateAITraffic(dt) {
   }
 }
 
-function isPointBlockingTraffic(car, px, pz, lookAhead = 13, laneWidth = 3.1) {
+function isPointBlockingTraffic(car, px, pz, lookAhead = 13, laneWidth = 2.35) {
   if (car.horizontal) {
     const moveDir = car.direction * -1;
     const ahead = (px - car.group.position.x) * moveDir;
@@ -40,6 +42,16 @@ function getTrafficBlocker(car) {
   for (const ped of peds) {
     if (ped.downTimer > 0) continue;
     if (isPointBlockingTraffic(car, ped.group.position.x, ped.group.position.z, 10, 2.7)) return { type: 'ped', ref: ped };
+  }
+  for (const other of aiCars) {
+    if (other === car || other.isHijacking) continue;
+    if (other.horizontal !== car.horizontal || other.laneIndex !== car.laneIndex || other.direction !== car.direction || other.laneSub !== car.laneSub) continue;
+    if (isPointBlockingTraffic(car, other.group.position.x, other.group.position.z, 18, 2.7)) return { type: 'vehicle', ref: other };
+  }
+  for (const other of vehicles) {
+    if (other.occupied) continue;
+    if (other.parkedInLot && !isOnRoad(other.group.position.x, other.group.position.z, 0.2)) continue;
+    if (isPointBlockingTraffic(car, other.group.position.x, other.group.position.z, 15, 2.6)) return { type: 'vehicle', ref: other };
   }
   return null;
 }
@@ -196,6 +208,27 @@ function updateLocationEffects(dt) {
   }
 }
 
+function updateParkingGates(dt) {
+  if (!parkingGateArms || !parkingGateArms.length) return;
+  const movingVehicles = [...vehicles, ...aiCars, ...policeCars];
+  for (const gate of parkingGateArms) {
+    let shouldOpen = false;
+    if (inVehicle && Math.hypot(inVehicle.group.position.x - gate.x, inVehicle.group.position.z - gate.z) < 9) shouldOpen = true;
+    for (const vehicle of movingVehicles) {
+      if (!vehicle || !vehicle.group) continue;
+      const moving = Math.abs(vehicle.velocity || vehicle.speed || 0) > 1;
+      if (!moving && vehicle !== inVehicle) continue;
+      if (Math.hypot(vehicle.group.position.x - gate.x, vehicle.group.position.z - gate.z) < 7.2) {
+        shouldOpen = true;
+        break;
+      }
+    }
+    const target = shouldOpen ? 1.22 : 0;
+    gate.open += (target - gate.open) * Math.min(1, dt * 5.5);
+    gate.pivot.rotation.z = gate.open;
+  }
+}
+
 let lastObjectiveFlashAt = 0;
 let lastScreenFlashAt = 0;
 let screenFlashFrameId = 0;
@@ -348,6 +381,7 @@ function updateCamera(dt) {
 
 // -------------------- VEHICLE ENTRY / EXIT --------------------
 function tryEnterExit() {
+  if (refuelState) return;
   if (jailTimer > 0 || arrestState || blackjackActive) return;
   if (hijackState) return;
   if (nearestServiceLocation && (inVehicle || canUseOnFootService(nearestServiceLocation)) && useServiceLocation(nearestServiceLocation)) {
@@ -468,7 +502,7 @@ function startHijackTrafficVehicle(car) {
     t: 0,
     duration: 1.25,
   };
-  reportCrime(2, 'CAR THEFT');
+  reportTrafficHijackCrime();
   player.heldItem.visible = true;
   document.getElementById('mode').textContent = 'HIJACKING';
 }
@@ -516,6 +550,7 @@ function updateHijackSequence(dt) {
 }
 
 function getVehicleCollisionRadius(vehicle) {
+  if (vehicle.collisionRadius) return vehicle.collisionRadius;
   if (vehicle.kind === 'bike') return 1.15;
   if (vehicle.kind === 'truck' || vehicle.kind === 'policeVan') return 2.65;
   if (vehicle.kind === 'pickup') return 2.05;
@@ -559,9 +594,10 @@ function updateVehicleCollisions(dt) {
       if (!b.group || a === b) continue;
       const dx = b.group.position.x - a.group.position.x;
       const dz = b.group.position.z - a.group.position.z;
-      const dist = Math.max(0.001, Math.hypot(dx, dz));
       const minDist = getVehicleCollisionRadius(a) + getVehicleCollisionRadius(b);
-      if (dist >= minDist) continue;
+      const distSq = dx * dx + dz * dz;
+      if (distSq >= minDist * minDist) continue;
+      const dist = Math.max(0.001, Math.sqrt(distSq));
 
       const nx = dx / dist;
       const nz = dz / dist;
@@ -604,9 +640,71 @@ function updateVehicleCollisions(dt) {
 // -------------------- MINIMAP --------------------
 const mmCanvas = document.getElementById('minimap');
 const mmCtx = mmCanvas.getContext('2d');
+const minimapWrap = document.getElementById('minimap-wrap');
 const mmSize = 200;
 const mmScale = mmSize / (GRID * BLOCK + 30);
 const minimapWorldPos = new Vector3();
+const worldMapPanel = document.getElementById('worldMapPanel');
+const worldMapCanvas = document.getElementById('worldMap');
+const worldMapCtx = worldMapCanvas.getContext('2d');
+const closeMapBtn = document.getElementById('closeMapBtn');
+const clearWaypointBtn = document.getElementById('clearWaypointBtn');
+const worldMapHint = document.getElementById('worldMapHint');
+let navigationTarget = null;
+
+function getNavigationRoute() {
+  if (!navigationTarget) return null;
+  const ref = inVehicle ? inVehicle.group.position : player.group.position;
+  const nearestRoad = value => {
+    const idx = MathUtils.clamp(Math.round((value + HALF) / BLOCK), 0, GRID);
+    return -HALF + idx * BLOCK;
+  };
+  const sx = nearestRoad(ref.x);
+  const sz = nearestRoad(ref.z);
+  const dx = nearestRoad(navigationTarget.x);
+  const dz = nearestRoad(navigationTarget.z);
+  return [
+    { x: ref.x, z: ref.z },
+    { x: sx, z: ref.z },
+    { x: sx, z: sz },
+    { x: dx, z: sz },
+    { x: dx, z: dz },
+    { x: navigationTarget.x, z: dz },
+    { x: navigationTarget.x, z: navigationTarget.z },
+  ];
+}
+
+function drawNavigationRoute(ctx, w2m, lineWidth = 3, markerSize = 7) {
+  if (!navigationTarget) return;
+  const route = getNavigationRoute();
+  if (!route) return;
+  ctx.save();
+  ctx.strokeStyle = '#ffd200';
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < route.length; i++) {
+    const [x, y] = w2m(route[i].x, route[i].z);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  const [tx, ty] = w2m(navigationTarget.x, navigationTarget.z);
+  ctx.fillStyle = '#ff5900';
+  ctx.strokeStyle = '#ffd200';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tx, ty - markerSize);
+  ctx.lineTo(tx + markerSize, ty);
+  ctx.lineTo(tx, ty + markerSize);
+  ctx.lineTo(tx - markerSize, ty);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawMinimap() {
   mmCtx.clearRect(0, 0, mmSize, mmSize);
   // BG
@@ -646,6 +744,7 @@ function drawMinimap() {
     const d = b.geometry.parameters.depth * mmScale;
     mmCtx.fillRect(x - w/2, y - d/2, w, d);
   }
+  drawNavigationRoute(mmCtx, w2m);
   // Vehicles
   for (const v of vehicles) {
     if (v === inVehicle) continue;
@@ -738,6 +837,157 @@ function drawMissionMarker(w2m) {
   mmCtx.restore();
 }
 
+function resizeWorldMapCanvas() {
+  const rect = worldMapCanvas.getBoundingClientRect();
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  const width = Math.max(320, Math.floor(rect.width));
+  const height = Math.max(320, Math.floor(rect.height));
+  if (worldMapCanvas.width !== Math.floor(width * dpr) || worldMapCanvas.height !== Math.floor(height * dpr)) {
+    worldMapCanvas.width = Math.floor(width * dpr);
+    worldMapCanvas.height = Math.floor(height * dpr);
+  }
+  worldMapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { width, height };
+}
+
+function mapWorldToCanvas(x, z, width, height) {
+  const mapSpan = GRID * BLOCK + 30;
+  const scale = Math.min(width, height) / mapSpan;
+  const ox = (width - mapSpan * scale) / 2;
+  const oy = (height - mapSpan * scale) / 2;
+  return [
+    ox + (x + HALF + 15) * scale,
+    oy + (z + HALF + 15) * scale,
+  ];
+}
+
+function mapCanvasToWorld(x, y, width, height) {
+  const mapSpan = GRID * BLOCK + 30;
+  const scale = Math.min(width, height) / mapSpan;
+  const ox = (width - mapSpan * scale) / 2;
+  const oy = (height - mapSpan * scale) / 2;
+  return {
+    x: MathUtils.clamp((x - ox) / scale - HALF - 15, -HALF, HALF),
+    z: MathUtils.clamp((y - oy) / scale - HALF - 15, -HALF, HALF),
+  };
+}
+
+function drawWorldMap() {
+  const { width, height } = resizeWorldMapCanvas();
+  const w2m = (x, z) => mapWorldToCanvas(x, z, width, height);
+  worldMapCtx.clearRect(0, 0, width, height);
+  worldMapCtx.fillStyle = '#12121e';
+  worldMapCtx.fillRect(0, 0, width, height);
+
+  worldMapCtx.strokeStyle = '#38384a';
+  worldMapCtx.lineWidth = Math.max(7, ROAD * Math.min(width, height) / (GRID * BLOCK + 30));
+  for (let i = 0; i <= GRID; i++) {
+    const pos = -HALF + i * BLOCK;
+    let [x1, y1] = w2m(-HALF, pos);
+    let [x2, y2] = w2m(HALF, pos);
+    worldMapCtx.beginPath(); worldMapCtx.moveTo(x1, y1); worldMapCtx.lineTo(x2, y2); worldMapCtx.stroke();
+    [x1, y1] = w2m(pos, -HALF);
+    [x2, y2] = w2m(pos, HALF);
+    worldMapCtx.beginPath(); worldMapCtx.moveTo(x1, y1); worldMapCtx.lineTo(x2, y2); worldMapCtx.stroke();
+  }
+
+  worldMapCtx.fillStyle = '#2d2d3c';
+  for (const b of buildingMeshes) {
+    b.getWorldPosition(minimapWorldPos);
+    const [x, y] = w2m(minimapWorldPos.x, minimapWorldPos.z);
+    const scale = Math.min(width, height) / (GRID * BLOCK + 30);
+    const w = b.geometry.parameters.width * scale;
+    const d = b.geometry.parameters.depth * scale;
+    worldMapCtx.fillRect(x - w/2, y - d/2, w, d);
+  }
+
+  drawNavigationRoute(worldMapCtx, w2m, 5, 10);
+
+  worldMapCtx.font = 'bold 11px IBM Plex Mono';
+  worldMapCtx.textAlign = 'center';
+  worldMapCtx.textBaseline = 'middle';
+  for (const loc of cityLocations) {
+    const [x, y] = w2m(loc.entrance.x, loc.entrance.z);
+    worldMapCtx.fillStyle = loc.mapColor;
+    worldMapCtx.beginPath();
+    worldMapCtx.moveTo(x, y - 8);
+    worldMapCtx.lineTo(x + 8, y);
+    worldMapCtx.lineTo(x, y + 8);
+    worldMapCtx.lineTo(x - 8, y);
+    worldMapCtx.closePath();
+    worldMapCtx.fill();
+    worldMapCtx.fillStyle = '#101018';
+    worldMapCtx.fillText(loc.label[0], x, y + 0.5);
+  }
+
+  const ref = inVehicle ? inVehicle.group : player.group;
+  const [px, py] = w2m(ref.position.x, ref.position.z);
+  worldMapCtx.save();
+  worldMapCtx.translate(px, py);
+  worldMapCtx.rotate(-(inVehicle ? inVehicle.group.rotation.y : player.yaw));
+  worldMapCtx.fillStyle = '#ffd200';
+  worldMapCtx.beginPath();
+  worldMapCtx.moveTo(0, -11);
+  worldMapCtx.lineTo(8, 8);
+  worldMapCtx.lineTo(-8, 8);
+  worldMapCtx.closePath();
+  worldMapCtx.fill();
+  worldMapCtx.restore();
+
+  if (worldMapHint) {
+    if (navigationTarget) {
+      const d = Math.hypot(navigationTarget.x - ref.position.x, navigationTarget.z - ref.position.z);
+      worldMapHint.textContent = `DESTINATION SET · ${Math.round(d)} M`;
+    } else {
+      worldMapHint.textContent = 'NO DESTINATION';
+    }
+  }
+}
+
+function openWorldMap() {
+  if (!worldMapPanel) return;
+  worldMapOpen = true;
+  worldMapPanel.classList.add('show');
+  if (document.exitPointerLock && document.pointerLockElement) document.exitPointerLock();
+  drawWorldMap();
+}
+
+function closeWorldMap() {
+  if (!worldMapPanel) return;
+  worldMapOpen = false;
+  worldMapPanel.classList.remove('show');
+}
+
+function toggleWorldMap() {
+  if (worldMapOpen) closeWorldMap();
+  else openWorldMap();
+}
+
+if (worldMapCanvas) {
+  worldMapCanvas.addEventListener('pointerdown', e => {
+    const rect = worldMapCanvas.getBoundingClientRect();
+    const { width, height } = resizeWorldMapCanvas();
+    navigationTarget = mapCanvasToWorld(e.clientX - rect.left, e.clientY - rect.top, width, height);
+    drawWorldMap();
+    e.preventDefault();
+  });
+}
+if (closeMapBtn) closeMapBtn.addEventListener('click', closeWorldMap);
+if (clearWaypointBtn) {
+  clearWaypointBtn.addEventListener('click', () => {
+    navigationTarget = null;
+    drawWorldMap();
+  });
+}
+if (minimapWrap) {
+  minimapWrap.addEventListener('mousedown', e => e.stopPropagation());
+  minimapWrap.addEventListener('pointerdown', e => {
+    if (!hud.classList.contains('active')) return;
+    openWorldMap();
+    e.preventDefault();
+  });
+}
+
 // -------------------- MAIN LOOP --------------------
 const promptEl = document.getElementById('prompt');
 const kmhEl = document.getElementById('kmh');
@@ -792,6 +1042,7 @@ function loop() {
     nearestLocation = null;
     nearestMissionStart = null;
     nearestServiceLocation = null;
+    nearestInteriorObject = null;
   } else if (blackjackActive) {
     nearestVehicle = null;
     nearestTrafficVehicle = null;
@@ -807,17 +1058,20 @@ function loop() {
     nearestLocation = null;
     nearestMissionStart = null;
     nearestServiceLocation = null;
+    nearestInteriorObject = null;
   } else if (inVehicle) {
-    updateVehicle(dt, inVehicle);
+    if (!refuelState) updateVehicle(dt, inVehicle);
     updateVehicleEffects(dt, inVehicle);
     nearestServiceLocation = findNearestServiceLocation();
     nearestMissionStart = null;
+    nearestInteriorObject = null;
   } else {
     updatePlayer(dt);
     nearestVehicle = findNearestVehicle();
     nearestLocation = findNearestLocation();
     nearestMissionStart = findMissionStart();
     nearestServiceLocation = findNearestServiceLocation();
+    nearestInteriorObject = findNearestInteriorObject();
     nearestTrafficVehicle = nearestVehicle || nearestLocation ? null : findNearestTrafficVehicle();
   }
   updateAITraffic(dt);
@@ -825,17 +1079,25 @@ function loop() {
   updateCombatEffects(dt);
   updateJail(dt);
   updateCitySceneActors(dt);
+  updateInteriorObjects(dt);
   updateLocationAlert(dt);
   updateLocationEffects(dt);
+  updateParkingGates(dt);
   updateMission(dt);
+  updatePoliceBuildingRaid(dt);
   updatePoliceChase(dt);
   updateVehicleCollisions(dt);
+  updateRefuelScene(dt);
   updateEnvironment(dt);
   updateCamera(dt);
 
   // F press
   if (keys['KeyF'] && !fPressedLast) tryEnterExit();
   fPressedLast = !!keys['KeyF'];
+
+  if (keys['KeyM'] && !mPressedLast) toggleWorldMap();
+  mPressedLast = !!keys['KeyM'];
+  if (worldMapOpen) drawWorldMap();
 
   // Track distance
   const ref = inVehicle ? inVehicle.group.position : player.group.position;
@@ -859,11 +1121,13 @@ function loop() {
       toggleClassIfChanged(locationBadgeEl, 'alert', wantedLevel > 0);
     }
     if (objectivePanelEl) {
-      const showObjective = !!activeMission || wantedLevel > 0 || bankAlarm || (inVehicle && inVehicle.health < 100);
+      const showObjective = !!activeMission || wantedLevel > 0 || bankAlarm || refuelState || (inVehicle && (inVehicle.health < 100 || inVehicle.fuel < 35));
       toggleClassIfChanged(objectivePanelEl, 'show', showObjective);
       toggleClassIfChanged(objectivePanelEl, 'alert', wantedLevel > 0 || bankAlarm);
-      setTextIfChanged(objectiveTitleEl, activeMission ? activeMission.name : (wantedLevel > 0 ? 'Wanted' : 'Vehicle Status'));
-      setTextIfChanged(objectiveTextEl, activeMission ? activeMission.statusText : (wantedLevel > 0 ? 'Reach GAS or GARAGE to lose heat.' : `Vehicle health ${Math.round(inVehicle ? inVehicle.health : 100)}%`));
+      setTextIfChanged(objectiveTitleEl, refuelState ? 'Refueling' : (activeMission ? activeMission.name : (wantedLevel > 0 ? 'Wanted' : 'Vehicle Status')));
+      setTextIfChanged(objectiveTextEl, refuelState
+      ? `Fuel ${Math.round(refuelState.veh.fuel)}% · vehicle patched`
+      : (activeMission ? activeMission.statusText : (wantedLevel > 0 ? 'Reach GAS or GARAGE to lose heat.' : `Health ${Math.round(inVehicle ? inVehicle.health : 100)}% · Fuel ${Math.round(inVehicle ? inVehicle.fuel : 100)}%`)));
       setTextIfChanged(objectiveTimerEl, activeMission && activeMission.status === 'active' ? `${Math.ceil(missionTimer)}s` : '');
       setTextIfChanged(objectiveWantedEl, wantedLevel > 0 ? `WANTED ${wantedLevel}` : '');
     }
@@ -890,11 +1154,19 @@ function loop() {
     if (jailTimer > 0) promptText = `JAILED · ${Math.ceil(jailTimer)}s`;
     else if (arrestState) promptText = 'POLICE TRANSPORT';
     else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'garage') promptText = '<kbd>F</kbd>REPAIR / REPAINT';
-    else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'gas') promptText = '<kbd>F</kbd>REFUEL / PATCH';
+    else if (refuelState) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = `REFUELING ${Math.min(100, Math.round((refuelState.timer / refuelState.duration) * 100))}%`;
+  }
+  else if (nearestServiceLocation && inVehicle && nearestServiceLocation.type === 'gas') promptText = '<kbd>F</kbd>REFUEL';
     else if (canUseShopService(nearestServiceLocation)) promptText = '<kbd>F</kbd>SHOP ITEM';
     else if (nearestServiceLocation && canUseOnFootService(nearestServiceLocation) && nearestServiceLocation.type === 'hospital') promptText = '<kbd>F</kbd>PATCH UP';
     else if (nearestMissionStart) promptText = '<kbd>F</kbd>START MISSION';
-    else if (blackjackReady) promptText = '<kbd>F</kbd>PLAY BLACKJACK';
+    else if (activeLocation && nearestInteriorObject) {
+    promptEl.classList.add('show');
+    promptEl.innerHTML = `<kbd>E</kbd>${nearestInteriorObject.label}`;
+  }
+  else if (blackjackReady) promptText = '<kbd>F</kbd>PLAY BLACKJACK';
     else if (activeLocation) promptText = '<kbd>F</kbd>EXIT TO STREET';
     else if (!inVehicle && nearestLocation) promptText = `<kbd>F</kbd>${nearestLocation.prompt}`;
     else if (!inVehicle && (nearestVehicle || nearestTrafficVehicle)) promptText = nearestTrafficVehicle ? '<kbd>F</kbd>HIJACK VEHICLE' : '<kbd>F</kbd>ENTER VEHICLE';
