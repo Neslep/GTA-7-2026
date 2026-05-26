@@ -44,7 +44,16 @@ function requestGamePointerLock() {
   renderer.domElement.requestPointerLock();
 }
 
-playBtn.addEventListener('click', () => {
+playBtn.addEventListener('click', async () => {
+  const previousLabel = playBtn.textContent;
+  if (window.GTAOnline && !window.GTAOnline.launched) {
+    playBtn.disabled = true;
+    playBtn.textContent = 'CONNECTING...';
+    const launched = await window.GTAOnline.launch();
+    playBtn.disabled = false;
+    playBtn.textContent = previousLabel;
+    if (!launched) return;
+  }
   intro.style.opacity = '0';
   setTimeout(() => intro.style.display = 'none', 800);
   hud.classList.add('active');

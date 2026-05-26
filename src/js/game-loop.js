@@ -831,6 +831,7 @@ function loop() {
   updatePoliceChase(dt);
   updateVehicleCollisions(dt);
   updateEnvironment(dt);
+  if (window.GTAOnline && window.GTAOnline.launched) window.GTAOnline.update(dt);
   updateCamera(dt);
 
   // F press

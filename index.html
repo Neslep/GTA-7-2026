@@ -45,6 +45,10 @@
       <div id="envTime">16:30</div>
       <div class="env-meta"><span id="envPhase">SUNSET</span> / <span id="envWeather">CLEAR</span></div>
     </div>
+    <div id="onlinePanel" aria-live="polite">
+      <span id="onlineState">OFFLINE</span>
+      <span id="onlineRoom"></span>
+    </div>
     <div class="status-pill"><span class="dot"></span>LIVE · <span id="mode">ON FOOT</span></div>
   </div>
 
@@ -147,11 +151,13 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/playroomkit/multiplayer.full.umd.js" crossorigin="anonymous"></script>
 <script src="src/js/core.js"></script>
 <script src="src/js/world.js"></script>
 <script src="src/js/entities.js"></script>
 <script src="src/js/controls.js"></script>
 <script src="src/js/environment.js"></script>
+<script src="src/js/multiplayer.js"></script>
 <script src="src/js/game-loop.js"></script>
 </body>
 </html>

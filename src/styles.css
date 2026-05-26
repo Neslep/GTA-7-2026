@@ -60,6 +60,7 @@
     box-shadow: 0 0 0 rgba(255, 210, 0, 0);
   }
   #playBtn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(255, 210, 0, 0.4); }
+  #playBtn:disabled { opacity: 0.58; cursor: wait; transform: none; box-shadow: none; }
   .controls-grid {
     display: grid; grid-template-columns: repeat(3, auto); gap: 12px 32px;
     margin-top: 56px; font-size: 12px; opacity: 0.7; max-width: 600px; text-align: center;
@@ -103,6 +104,38 @@
   }
   .status-pill .dot { display: inline-block; width: 6px; height: 6px; background: #00ff88; border-radius: 50%; margin-right: 8px; animation: pulse 1.2s infinite; }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  #onlinePanel {
+    position: absolute;
+    top: 42px;
+    right: 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    max-width: min(48vw, 360px);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: rgba(255,255,255,0.78);
+    text-align: right;
+  }
+  #onlinePanel span {
+    padding: 6px 9px;
+    border: 1px solid rgba(0, 195, 255, 0.32);
+    background: rgba(10, 10, 18, 0.58);
+    backdrop-filter: blur(8px);
+    clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+    white-space: nowrap;
+  }
+  #onlinePanel.online #onlineState {
+    color: #0aff9d;
+    border-color: rgba(10, 255, 157, 0.5);
+  }
+  #onlinePanel.offline #onlineState {
+    color: #ffd200;
+    border-color: rgba(255, 210, 0, 0.42);
+  }
 
   #environmentPanel {
     position: absolute;
@@ -680,6 +713,17 @@
     }
     .logo { font-size: 24px; letter-spacing: 2px; }
     .status-pill { padding: 7px 12px; font-size: 10px; letter-spacing: 1.5px; }
+    #onlinePanel {
+      top: 76px;
+      right: 0;
+      max-width: 46vw;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      font-size: 8px;
+      letter-spacing: 1.2px;
+    }
+    #onlinePanel span { padding: 5px 7px; }
     #environmentPanel {
       top: 42px;
       min-width: 168px;
