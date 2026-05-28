@@ -1088,7 +1088,6 @@ function loop() {
   updatePoliceChase(dt);
   updateVehicleCollisions(dt);
   updateRefuelScene(dt);
-  updateEnvironment(dt);
   updateCamera(dt);
 
   // F press

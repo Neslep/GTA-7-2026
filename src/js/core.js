@@ -37,13 +37,13 @@ function applyGfxSettings() {
 
 // -------------------- RENDERER / SCENE --------------------
 const scene = new Scene();
-scene.background = new Color(0x16182a);
-scene.fog = new Fog(0x2a2a4a, 80, 380);
+scene.background = new Color(0x79ccff);
+scene.fog = new Fog(0xc2def1, 80, 380);
 
 const camera = new PerspectiveCamera(72, innerWidth/innerHeight, 0.1, 500);
 camera.position.set(0, 5, 12);
 
-const renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+const renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = PCFSoftShadowMap;
@@ -58,14 +58,14 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-// -------------------- LIGHTING (golden hour) --------------------
-const ambientLight = new AmbientLight(0xffd6a8, 0.45);
+// -------------------- LIGHTING (bright day) --------------------
+const ambientLight = new AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
-const hemiLight = new HemisphereLight(0xffb070, 0x202040, 0.45);
+const hemiLight = new HemisphereLight(0xc8ecff, 0x52644a, 0.6);
 scene.add(hemiLight);
 
-const sun = new DirectionalLight(0xffd28a, 1.25);
-sun.position.set(80, 110, 35);
+const sun = new DirectionalLight(0xffffff, 1.3);
+sun.position.set(20, 150, 40);
 sun.castShadow = true;
 const SH = 160;
 sun.shadow.camera.left = -SH; sun.shadow.camera.right = SH;
